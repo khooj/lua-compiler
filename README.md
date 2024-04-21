@@ -1,2 +1,2 @@
 # lua-compiler
-simple lua-compiler in C++
+simple lua-compiler in ~~C++~~ Rust (8 years huh)
