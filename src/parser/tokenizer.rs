@@ -1,8 +1,13 @@
+use std::ops::Index;
+
 use nom::{
     branch::alt,
-    bytes::complete::tag,
-    character::complete::{
-        alpha1, alphanumeric1, char, digit1, line_ending, multispace0, not_line_ending, one_of,
+    bytes::complete::{is_not, tag, take_while},
+    character::{
+        complete::{
+            alpha1, alphanumeric1, char, digit1, line_ending, multispace0, not_line_ending, one_of,
+        },
+        is_alphabetic,
     },
     combinator::{cut, map, map_res, not, opt},
     error::{context, ContextError, FromExternalError, ParseError},
@@ -58,6 +63,99 @@ fn identifier<'a, E: ParseError<&'a str> + ContextError<&'a str>>(
     Ok((i, Identifier { s: ident }))
 }
 
+#[derive(strum::FromRepr)]
+enum Operator {
+    Plus = 0,
+    Minus,
+    Asterisk,
+    Slash,
+    Percent,
+    Circumflex,       // ^
+    Hashtag,          // # (?)
+    And,              // &
+    Tilde,            // ~
+    Wall,             // |
+    DoubleLess,       // <<
+    DoubleGreater,    // >>
+    DoubleSlash,      // //
+    DoubleEqual,      // ==
+    AlmostEqual,      // ~=
+    LessEqual,        // <=
+    GreaterEqual,     // >=
+    Less,             // <
+    Greater,          // >
+    Equal,            // =
+    OpenParentheses,  // (
+    CloseParentheses, // )
+    OpenCurly,        // {
+    CloseCurly,       // }
+    OpenSquare,       // [
+    CloseSquare,      // ]
+    DoubleColon,      // ::
+    Semicolon,        // ;
+    Colon,            // :
+    Comma,            // ,
+    FullStop,         // .
+    DoubleFullStop,   // ..
+    Elipsis,          // ...
+}
+
+const OPERATOR_SYMB: &[&str] = &[
+    "+", "-", "*", "/", "%", "^", "#", "&", "~", "|", "<<", ">>", "//", "==", "~=", "<=", ">=",
+    "<", ">", "=", "(", ")", "{", "}", "[", "]", "::", ";", ":", ",", ".", "..", "...",
+];
+
+fn operator<'a, E: ParseError<&'a str> + ContextError<&'a str>>(
+    i: &'a str,
+) -> IResult<&'a str, Operator, E> {
+    let (i, op) = context(
+        "operator",
+        alt((
+            tag("+"),
+            tag("-"),
+            tag("*"),
+            tag("/"),
+            tag("%"),
+            tag("^"),
+            tag("#"),
+            tag("&"),
+            tag("~"),
+            tag("|"),
+            tag("<<"),
+            tag(">>"),
+            tag("//"),
+            alt((
+                tag("=="),
+                tag("~="),
+                tag("<="),
+                tag(">="),
+                tag("<"),
+                tag(">"),
+                tag("="),
+                tag("("),
+                tag(")"),
+                tag("{"),
+                tag("}"),
+                tag("["),
+                tag("]"),
+                tag("::"),
+                tag(";"),
+                tag(":"),
+                tag(","),
+                tag("."),
+                tag(".."),
+                tag("..."),
+            )),
+        )),
+    )(i)?;
+    if let Some(idx) = OPERATOR_SYMB.iter().position(|e| *e == op) {
+        Ok((i, Operator::from_repr(idx).unwrap()))
+    } else {
+        let _ = context("operator_err", cut(tag("false")))("true")?;
+        unreachable!()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -71,6 +169,8 @@ mod tests {
             ("_123", true),
             ("123asd", false),
             ("a123_", true),
+            ("And", true),
+            ("AND", true),
         ];
         for t in test_idents {
             let ident = identifier::<VerboseError<&str>>(t.0);
@@ -95,6 +195,26 @@ mod tests {
                 }
             }
         }
+
         Ok(())
+    }
+
+    #[test]
+    fn check_operator() {
+        for op in OPERATOR_SYMB {
+            match operator::<VerboseError<&str>>(op) {
+                Ok(_) => continue,
+                Err(nom::Err::Error(e)) | Err(nom::Err::Failure(e)) => {
+                    println!("op error: {}", convert_error(*op, e.clone()));
+                    assert!(false);
+                }
+                _ => {
+                    assert!(false);
+                }
+            };
+        }
+        assert!(operator::<VerboseError<&str>>("asd").is_err());
+        assert!(operator::<VerboseError<&str>>("123").is_err());
+        assert!(operator::<VerboseError<&str>>("_dsa").is_err());
     }
 }
