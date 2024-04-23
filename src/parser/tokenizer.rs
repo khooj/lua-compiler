@@ -2,7 +2,7 @@ use std::ops::Index;
 
 use nom::{
     branch::alt,
-    bytes::complete::{is_not, tag, take_while},
+    bytes::complete::{is_not, tag, take_while, take_while_m_n},
     character::{
         complete::{
             alpha1, alphanumeric1, char, digit1, line_ending, multispace0, not_line_ending, one_of,
@@ -156,25 +156,43 @@ fn operator<'a, E: ParseError<&'a str> + ContextError<&'a str>>(
     }
 }
 
+enum ShortStringLiteralContent {}
+
+fn short_string_literal_content<'a, E: ParseError<&'a str> + ContextError<&'a str>>(
+    i: &'a str,
+) -> IResult<&'a str, String, E> {
+    let escape_seq = tuple((tag("\\"), one_of("abfnrtv\\\"\'")));
+    let hex_byte = tuple((tag("\\x"), take_while_m_n(2, 2, |c: char| c.is_digit(16))));
+    let digits = tuple((tag("\\"), take_while_m_n(1, 3, |c: char| c.is_digit(10))));
+    let utf_char = tuple((tag("\\u"), take_while_m_n(3, 3, |c: char| c.is_digit(16))));
+    let (i, res) = context(
+        "short_string_literal_content",
+        alt((
+            map(escape_seq, |(c, c2)| (c, c2.to_string())),
+            map(hex_byte, |(c, c2): (&str, &str)| (c, c2.to_string())),
+            map(digits, |(c, c2): (&str, &str)| (c, c2.to_string())),
+            map(utf_char, |(c, c2): (&str, &str)| (c, c2.to_string())),
+        )),
+    )(i)?;
+    Ok((i, format!("{}{}", res.0, res.1)))
+}
+
 #[derive(Debug, PartialEq)]
 struct ShortLiteralString(String);
 
 fn short_literal_string<'a, E: ParseError<&'a str> + ContextError<&'a str>>(
     i: &'a str,
 ) -> IResult<&'a str, ShortLiteralString, E> {
-    // TODO: is it possible to reuse function?
-    let content = tuple((char('\\'), one_of("abfnrtv\\\"\'")));
-    let content2 = tuple((char('\\'), one_of("abfnrtv\\\"\'")));
     let single = context(
         "short_literal_string_single",
-        delimited(char('\''), content, char('\'')),
+        delimited(char('\''), short_string_literal_content, char('\'')),
     );
     let double = context(
         "short_literal_string_double",
-        delimited(char('\"'), content2, char('\"')),
+        delimited(char('\"'), short_string_literal_content, char('\"')),
     );
     let (i, lit) = context("short_literal_string", alt((single, double)))(i)?;
-    Ok((i, ShortLiteralString(format!("{}{}", lit.0, lit.1))))
+    Ok((i, ShortLiteralString(lit)))
 }
 
 struct LiteralString;
@@ -247,7 +265,7 @@ mod tests {
     }
 
     #[test]
-    fn check_short_literal_string() {
+    fn check_short_literal_string_escape_seq() {
         assert_eq!(
             short_literal_string::<VerboseError<&str>>(r"'\a'"),
             Ok(("", ShortLiteralString("\\a".into())))
@@ -263,5 +281,37 @@ mod tests {
         assert!(short_literal_string::<VerboseError<&str>>(r"'\''").is_ok());
         assert!(short_literal_string::<VerboseError<&str>>(r#"'\a""#).is_err()); // different quotes
         assert!(short_literal_string::<VerboseError<&str>>(r"'\z'").is_err());
+    }
+
+    #[test]
+    fn check_short_literal_string_escape_seq_byte() {
+        assert_eq!(
+            short_literal_string::<VerboseError<&str>>(r"'\xAF'"),
+            Ok(("", ShortLiteralString("\\xAF".into())))
+        );
+    }
+
+    #[test]
+    fn check_short_literal_string_escape_seq_digits() {
+        assert_eq!(
+            short_literal_string::<VerboseError<&str>>(r"'\123'"),
+            Ok(("", ShortLiteralString("\\123".into())))
+        );
+        assert_eq!(
+            short_literal_string::<VerboseError<&str>>(r"'\12'"),
+            Ok(("", ShortLiteralString("\\12".into())))
+        );
+        assert_eq!(
+            short_literal_string::<VerboseError<&str>>(r"'\1'"),
+            Ok(("", ShortLiteralString("\\1".into())))
+        );
+    }
+
+    #[test]
+    fn check_short_literal_string_escape_seq_utf8() {
+        assert_eq!(
+            short_literal_string::<VerboseError<&str>>(r"'\uaF2'"),
+            Ok(("", ShortLiteralString("\\uaF2".into())))
+        );
     }
 }
