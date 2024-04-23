@@ -156,6 +156,34 @@ fn operator<'a, E: ParseError<&'a str> + ContextError<&'a str>>(
     }
 }
 
+#[derive(Debug, PartialEq)]
+struct ShortLiteralString(String);
+
+fn short_literal_string<'a, E: ParseError<&'a str> + ContextError<&'a str>>(
+    i: &'a str,
+) -> IResult<&'a str, ShortLiteralString, E> {
+    // TODO: is it possible to reuse function?
+    let content = tuple((char('\\'), one_of("abfnrtv\\\"\'")));
+    let content2 = tuple((char('\\'), one_of("abfnrtv\\\"\'")));
+    let single = context(
+        "short_literal_string_single",
+        delimited(char('\''), content, char('\'')),
+    );
+    let double = context(
+        "short_literal_string_double",
+        delimited(char('\"'), content2, char('\"')),
+    );
+    let (i, lit) = context("short_literal_string", alt((single, double)))(i)?;
+    Ok((i, ShortLiteralString(format!("{}{}", lit.0, lit.1))))
+}
+
+struct LiteralString;
+
+// fn literal_string<'a, E: ParseError<&'a str> + ContextError<&'a str>>(
+//     i: &'a str,
+// ) -> IResult<&'a str, LiteralString, E> {
+// }
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -216,5 +244,24 @@ mod tests {
         assert!(operator::<VerboseError<&str>>("asd").is_err());
         assert!(operator::<VerboseError<&str>>("123").is_err());
         assert!(operator::<VerboseError<&str>>("_dsa").is_err());
+    }
+
+    #[test]
+    fn check_short_literal_string() {
+        assert_eq!(
+            short_literal_string::<VerboseError<&str>>(r"'\a'"),
+            Ok(("", ShortLiteralString("\\a".into())))
+        );
+        assert!(short_literal_string::<VerboseError<&str>>(r"'\b'").is_ok());
+        assert!(short_literal_string::<VerboseError<&str>>(r"'\f'").is_ok());
+        assert!(short_literal_string::<VerboseError<&str>>(r"'\n'").is_ok());
+        assert!(short_literal_string::<VerboseError<&str>>(r"'\r'").is_ok());
+        assert!(short_literal_string::<VerboseError<&str>>(r"'\t'").is_ok());
+        assert!(short_literal_string::<VerboseError<&str>>(r#""\v""#).is_ok());
+        assert!(short_literal_string::<VerboseError<&str>>(r#""\\""#).is_ok());
+        assert!(short_literal_string::<VerboseError<&str>>(r#"'\"'"#).is_ok());
+        assert!(short_literal_string::<VerboseError<&str>>(r"'\''").is_ok());
+        assert!(short_literal_string::<VerboseError<&str>>(r#"'\a""#).is_err()); // different quotes
+        assert!(short_literal_string::<VerboseError<&str>>(r"'\z'").is_err());
     }
 }
