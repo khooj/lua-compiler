@@ -11,7 +11,7 @@ use nom::{
     },
     combinator::{cut, map, map_res, not, opt},
     error::{context, ContextError, FromExternalError, ParseError},
-    multi::{length_count, many0, many_m_n, separated_list0},
+    multi::{length_count, many0, many1, many_m_n, separated_list0},
     sequence::{delimited, preceded, tuple},
     IResult,
 };
@@ -156,9 +156,7 @@ fn operator<'a, E: ParseError<&'a str> + ContextError<&'a str>>(
     }
 }
 
-enum ShortStringLiteralContent {}
-
-fn short_string_literal_content<'a, E: ParseError<&'a str> + ContextError<&'a str>>(
+fn literal_string_escape_seqs<'a, E: ParseError<&'a str> + ContextError<&'a str>>(
     i: &'a str,
 ) -> IResult<&'a str, String, E> {
     let escape_seq = tuple((tag("\\"), one_of("abfnrtv\\\"\'")));
@@ -166,7 +164,7 @@ fn short_string_literal_content<'a, E: ParseError<&'a str> + ContextError<&'a st
     let digits = tuple((tag("\\"), take_while_m_n(1, 3, |c: char| c.is_digit(10))));
     let utf_char = tuple((tag("\\u"), take_while_m_n(3, 3, |c: char| c.is_digit(16))));
     let (i, res) = context(
-        "short_string_literal_content",
+        "string_literal_escape_seq",
         alt((
             map(escape_seq, |(c, c2)| (c, c2.to_string())),
             map(hex_byte, |(c, c2): (&str, &str)| (c, c2.to_string())),
@@ -177,25 +175,44 @@ fn short_string_literal_content<'a, E: ParseError<&'a str> + ContextError<&'a st
     Ok((i, format!("{}{}", res.0, res.1)))
 }
 
-#[derive(Debug, PartialEq)]
-struct ShortLiteralString(String);
-
-fn short_literal_string<'a, E: ParseError<&'a str> + ContextError<&'a str>>(
+fn literal_string_content<'a, E: ParseError<&'a str> + ContextError<&'a str>>(
     i: &'a str,
-) -> IResult<&'a str, ShortLiteralString, E> {
-    let single = context(
-        "short_literal_string_single",
-        delimited(char('\''), short_string_literal_content, char('\'')),
-    );
-    let double = context(
-        "short_literal_string_double",
-        delimited(char('\"'), short_string_literal_content, char('\"')),
-    );
-    let (i, lit) = context("short_literal_string", alt((single, double)))(i)?;
-    Ok((i, ShortLiteralString(lit)))
+) -> IResult<&'a str, String, E> {
+    let (i, res) = context(
+        "literal_string_content",
+        many0(alt((
+            context(
+                "map inside content",
+                map(take_while(|c: char| c.is_alphabetic()), |s: &str| {
+                    s.to_string()
+                }),
+            ),
+            literal_string_escape_seqs,
+        ))),
+    )(i)?;
+    Ok((i, res.into_iter().collect::<String>()))
 }
 
-struct LiteralString;
+#[derive(Debug, PartialEq)]
+struct LiteralString(String);
+
+fn literal_string<'a, E: ParseError<&'a str> + ContextError<&'a str>>(
+    i: &'a str,
+) -> IResult<&'a str, LiteralString, E> {
+    let single = context(
+        "literal_string_single",
+        delimited(char('\''), literal_string_content, char('\'')),
+    );
+    let double = context(
+        "literal_string_double",
+        delimited(char('\"'), literal_string_content, char('\"')),
+    );
+    let (i, lit) = context("literal_string", alt((single, double)))(i)?;
+    Ok((i, LiteralString(lit)))
+}
+
+// #[derive(Debug, PartialEq)]
+// struct LiteralString(String);
 
 // fn literal_string<'a, E: ParseError<&'a str> + ContextError<&'a str>>(
 //     i: &'a str,
@@ -267,51 +284,56 @@ mod tests {
     #[test]
     fn check_short_literal_string_escape_seq() {
         assert_eq!(
-            short_literal_string::<VerboseError<&str>>(r"'\a'"),
-            Ok(("", ShortLiteralString("\\a".into())))
+            literal_string_content::<VerboseError<&str>>(r"\a"),
+            Ok(("", "\\a".into()))
         );
-        assert!(short_literal_string::<VerboseError<&str>>(r"'\b'").is_ok());
-        assert!(short_literal_string::<VerboseError<&str>>(r"'\f'").is_ok());
-        assert!(short_literal_string::<VerboseError<&str>>(r"'\n'").is_ok());
-        assert!(short_literal_string::<VerboseError<&str>>(r"'\r'").is_ok());
-        assert!(short_literal_string::<VerboseError<&str>>(r"'\t'").is_ok());
-        assert!(short_literal_string::<VerboseError<&str>>(r#""\v""#).is_ok());
-        assert!(short_literal_string::<VerboseError<&str>>(r#""\\""#).is_ok());
-        assert!(short_literal_string::<VerboseError<&str>>(r#"'\"'"#).is_ok());
-        assert!(short_literal_string::<VerboseError<&str>>(r"'\''").is_ok());
-        assert!(short_literal_string::<VerboseError<&str>>(r#"'\a""#).is_err()); // different quotes
-        assert!(short_literal_string::<VerboseError<&str>>(r"'\z'").is_err());
+        assert!(literal_string::<VerboseError<&str>>(r"'\b'").is_ok());
+        assert!(literal_string::<VerboseError<&str>>(r"'\f'").is_ok());
+        assert!(literal_string::<VerboseError<&str>>(r"'\n'").is_ok());
+        assert!(literal_string::<VerboseError<&str>>(r"'\r'").is_ok());
+        assert!(literal_string::<VerboseError<&str>>(r"'\t'").is_ok());
+        assert!(literal_string::<VerboseError<&str>>(r#""\v""#).is_ok());
+        assert!(literal_string::<VerboseError<&str>>(r#""\\""#).is_ok());
+        assert!(literal_string::<VerboseError<&str>>(r#"'\"'"#).is_ok());
+        assert!(literal_string::<VerboseError<&str>>(r"'\''").is_ok());
+        assert!(literal_string::<VerboseError<&str>>(r#"'\a""#).is_err()); // different quotes
+        assert!(literal_string::<VerboseError<&str>>(r"'\z'").is_err());
     }
 
     #[test]
     fn check_short_literal_string_escape_seq_byte() {
-        assert_eq!(
-            short_literal_string::<VerboseError<&str>>(r"'\xAF'"),
-            Ok(("", ShortLiteralString("\\xAF".into())))
-        );
+        let input = r"'\xAF'";
+        let res = literal_string::<VerboseError<&str>>(input);
+        match res {
+            Err(nom::Err::Error(e)) | Err(nom::Err::Failure(e)) => {
+                println!("err: {}", convert_error(input, e));
+                assert!(false);
+            }
+            _ => {}
+        };
     }
 
     #[test]
     fn check_short_literal_string_escape_seq_digits() {
         assert_eq!(
-            short_literal_string::<VerboseError<&str>>(r"'\123'"),
-            Ok(("", ShortLiteralString("\\123".into())))
+            literal_string::<VerboseError<&str>>(r"'\123'"),
+            Ok(("", LiteralString("\\123".into())))
         );
         assert_eq!(
-            short_literal_string::<VerboseError<&str>>(r"'\12'"),
-            Ok(("", ShortLiteralString("\\12".into())))
+            literal_string::<VerboseError<&str>>(r"'\12'"),
+            Ok(("", LiteralString("\\12".into())))
         );
         assert_eq!(
-            short_literal_string::<VerboseError<&str>>(r"'\1'"),
-            Ok(("", ShortLiteralString("\\1".into())))
+            literal_string::<VerboseError<&str>>(r"'\1'"),
+            Ok(("", LiteralString("\\1".into())))
         );
     }
 
     #[test]
     fn check_short_literal_string_escape_seq_utf8() {
         assert_eq!(
-            short_literal_string::<VerboseError<&str>>(r"'\uaF2'"),
-            Ok(("", ShortLiteralString("\\uaF2".into())))
+            literal_string::<VerboseError<&str>>(r"'\uaF2'"),
+            Ok(("", LiteralString("\\uaF2".into())))
         );
     }
 }
