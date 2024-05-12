@@ -181,13 +181,10 @@ fn literal_string_content<'a, E: ParseError<&'a str> + ContextError<&'a str>>(
 ) -> IResult<&'a str, String, E> {
     let (i, res) = context(
         "literal_string_content",
-        context(
-            "many1 inside",
-            many1(alt((
-                literal_string_escape_seqs,
-                map(alphanumeric1, |s: &str| s.to_string()),
-            ))),
-        ),
+        many0(alt((
+            literal_string_escape_seqs,
+            map(alphanumeric1, |s: &str| s.to_string()),
+        ))),
     )(i)?;
     Ok((i, res.into_iter().collect::<String>()))
 }
