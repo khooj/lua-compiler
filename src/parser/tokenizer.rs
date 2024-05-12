@@ -5,13 +5,14 @@ use nom::{
     bytes::complete::{is_not, tag, take_while, take_while_m_n},
     character::{
         complete::{
-            alpha1, alphanumeric1, char, digit1, line_ending, multispace0, not_line_ending, one_of,
+            alpha1, alphanumeric0, alphanumeric1, char, digit1, line_ending, multispace0, newline,
+            not_line_ending, one_of,
         },
         is_alphabetic,
     },
     combinator::{cut, map, map_res, not, opt},
     error::{context, ContextError, FromExternalError, ParseError},
-    multi::{length_count, many0, many1, many_m_n, separated_list0},
+    multi::{count, length_count, many0, many0_count, many1, many_m_n, separated_list0},
     sequence::{delimited, preceded, tuple},
     IResult,
 };
@@ -180,15 +181,13 @@ fn literal_string_content<'a, E: ParseError<&'a str> + ContextError<&'a str>>(
 ) -> IResult<&'a str, String, E> {
     let (i, res) = context(
         "literal_string_content",
-        many0(alt((
-            context(
-                "map inside content",
-                map(take_while(|c: char| c.is_alphabetic()), |s: &str| {
-                    s.to_string()
-                }),
-            ),
-            literal_string_escape_seqs,
-        ))),
+        context(
+            "many1 inside",
+            many1(alt((
+                literal_string_escape_seqs,
+                map(alphanumeric1, |s: &str| s.to_string()),
+            ))),
+        ),
     )(i)?;
     Ok((i, res.into_iter().collect::<String>()))
 }
@@ -209,6 +208,33 @@ fn literal_string<'a, E: ParseError<&'a str> + ContextError<&'a str>>(
     );
     let (i, lit) = context("literal_string", alt((single, double)))(i)?;
     Ok((i, LiteralString(lit)))
+}
+
+fn multiline_literal_string<'a, E: ParseError<&'a str> + ContextError<&'a str>>(
+    i: &'a str,
+) -> IResult<&'a str, LiteralString, E> {
+    let (i, _) = context("opening_bracket", char('['))(i)?;
+    let (i, eq_count) = many0_count(char('='))(i)?;
+    let (i, _) = context("opening_bracket_end", char('['))(i)?;
+    let (i, _) = context("multiline_newline", opt(line_ending))(i)?;
+    let (i, content) = context(
+        "multiline_content",
+        take_while(|c: char| {
+            c != ']'
+                && (c.is_ascii_alphanumeric()
+                    || c.is_ascii_whitespace()
+                    || c.is_ascii_punctuation())
+        }),
+    )(i)?;
+    let (i, _) = context(
+        "multiline_closing_bracket",
+        tuple((
+            char(']'),
+            many_m_n(eq_count, eq_count, char('=')),
+            char(']'),
+        )),
+    )(i)?;
+    Ok((i, LiteralString(content.to_string())))
 }
 
 // #[derive(Debug, PartialEq)]
@@ -282,28 +308,54 @@ mod tests {
     }
 
     #[test]
+    fn check_literal_string_content() {
+        match literal_string_content::<VerboseError<&str>>(r"\a") {
+            Err(nom::Err::Error(e)) | Err(nom::Err::Failure(e)) => {
+                println!("err: {}", convert_error(r"\a", e));
+                assert!(false);
+            }
+            Ok((_, s)) => assert_eq!(s, "\\a"),
+            _ => assert!(false),
+        };
+        match literal_string_content::<VerboseError<&str>>(r"asd") {
+            Err(nom::Err::Error(e)) | Err(nom::Err::Failure(e)) => {
+                println!("err: {}", convert_error(r"asd", e));
+                assert!(false);
+            }
+            Ok((_, s)) => assert_eq!(s, "asd"),
+            _ => assert!(false),
+        };
+    }
+
+    #[test]
+    fn check_literal_string_escape_seqs_content() {
+        match literal_string_escape_seqs::<VerboseError<&str>>(r"\a") {
+            Err(nom::Err::Error(e)) | Err(nom::Err::Failure(e)) => {
+                println!("err: {}", convert_error(r"\a", e));
+                assert!(false);
+            }
+            Ok((_, s)) => assert_eq!(s, "\\a"),
+            _ => assert!(false),
+        };
+    }
+
+    #[test]
     fn check_short_literal_string_escape_seq() {
-        assert_eq!(
-            literal_string_content::<VerboseError<&str>>(r"\a"),
-            Ok(("", "\\a".into()))
-        );
-        assert!(literal_string::<VerboseError<&str>>(r"'\b'").is_ok());
-        assert!(literal_string::<VerboseError<&str>>(r"'\f'").is_ok());
-        assert!(literal_string::<VerboseError<&str>>(r"'\n'").is_ok());
-        assert!(literal_string::<VerboseError<&str>>(r"'\r'").is_ok());
-        assert!(literal_string::<VerboseError<&str>>(r"'\t'").is_ok());
-        assert!(literal_string::<VerboseError<&str>>(r#""\v""#).is_ok());
-        assert!(literal_string::<VerboseError<&str>>(r#""\\""#).is_ok());
-        assert!(literal_string::<VerboseError<&str>>(r#"'\"'"#).is_ok());
-        assert!(literal_string::<VerboseError<&str>>(r"'\''").is_ok());
-        assert!(literal_string::<VerboseError<&str>>(r#"'\a""#).is_err()); // different quotes
-        assert!(literal_string::<VerboseError<&str>>(r"'\z'").is_err());
+        assert!(literal_string_escape_seqs::<VerboseError<&str>>(r"\b").is_ok());
+        assert!(literal_string_escape_seqs::<VerboseError<&str>>(r"\f").is_ok());
+        assert!(literal_string_escape_seqs::<VerboseError<&str>>(r"\n").is_ok());
+        assert!(literal_string_escape_seqs::<VerboseError<&str>>(r"\r").is_ok());
+        assert!(literal_string_escape_seqs::<VerboseError<&str>>(r"\t").is_ok());
+        assert!(literal_string_escape_seqs::<VerboseError<&str>>(r"\v").is_ok());
+        assert!(literal_string_escape_seqs::<VerboseError<&str>>(r"\\").is_ok());
+        assert!(literal_string_escape_seqs::<VerboseError<&str>>("\\\"").is_ok());
+        assert!(literal_string_escape_seqs::<VerboseError<&str>>(r"\'").is_ok());
     }
 
     #[test]
     fn check_short_literal_string_escape_seq_byte() {
-        let input = r"'\xAF'";
-        let res = literal_string::<VerboseError<&str>>(input);
+        let input = r"\xAF";
+        let res = literal_string_escape_seqs::<VerboseError<&str>>(input);
         match res {
             Err(nom::Err::Error(e)) | Err(nom::Err::Failure(e)) => {
                 println!("err: {}", convert_error(input, e));
@@ -316,24 +368,38 @@ mod tests {
     #[test]
     fn check_short_literal_string_escape_seq_digits() {
         assert_eq!(
-            literal_string::<VerboseError<&str>>(r"'\123'"),
-            Ok(("", LiteralString("\\123".into())))
+            literal_string_escape_seqs::<VerboseError<&str>>(r"\123"),
+            Ok(("", "\\123".into()))
         );
         assert_eq!(
-            literal_string::<VerboseError<&str>>(r"'\12'"),
-            Ok(("", LiteralString("\\12".into())))
+            literal_string_escape_seqs::<VerboseError<&str>>(r"\12"),
+            Ok(("", "\\12".into()))
         );
         assert_eq!(
-            literal_string::<VerboseError<&str>>(r"'\1'"),
-            Ok(("", LiteralString("\\1".into())))
+            literal_string_escape_seqs::<VerboseError<&str>>(r"\1"),
+            Ok(("", "\\1".into()))
         );
     }
 
     #[test]
     fn check_short_literal_string_escape_seq_utf8() {
         assert_eq!(
-            literal_string::<VerboseError<&str>>(r"'\uaF2'"),
-            Ok(("", LiteralString("\\uaF2".into())))
+            literal_string_escape_seqs::<VerboseError<&str>>(r"\uaF2"),
+            Ok(("", "\\uaF2".into()))
         );
+    }
+
+    #[test]
+    fn check_multiline_literal_string() {
+        let input = r#"[[alo
+123"]]"#;
+        match multiline_literal_string::<VerboseError<&str>>(input) {
+            Err(nom::Err::Error(e)) | Err(nom::Err::Failure(e)) => {
+                println!("err: {}", convert_error(input, e));
+                assert!(false);
+            }
+            Ok((_, s)) => assert_eq!(s.0, "alo\n123\""),
+            _ => {}
+        };
     }
 }
