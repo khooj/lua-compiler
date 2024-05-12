@@ -398,5 +398,33 @@ mod tests {
             Ok((_, s)) => assert_eq!(s.0, "alo\n123\""),
             _ => {}
         };
+        let input = r#"[==[alo
+123"]==]"#;
+        match multiline_literal_string::<VerboseError<&str>>(input) {
+            Err(nom::Err::Error(e)) | Err(nom::Err::Failure(e)) => {
+                println!("err: {}", convert_error(input, e));
+                assert!(false);
+            }
+            Ok((_, s)) => assert_eq!(s.0, "alo\n123\""),
+            _ => {}
+        };
+    }
+
+    #[test]
+    fn check_multiline_literal_string_error() {
+        let input = r#"[=[alo
+123"]]"#;
+        match multiline_literal_string::<VerboseError<&str>>(input) {
+            Err(nom::Err::Error(e)) | Err(nom::Err::Failure(e)) => {}
+            Ok((_, s)) => assert!(false, "{}", s.0.as_str()),
+            _ => {}
+        };
+        let input = r#"[=[alo
+123"]==]"#;
+        match multiline_literal_string::<VerboseError<&str>>(input) {
+            Err(nom::Err::Error(e)) | Err(nom::Err::Failure(e)) => {}
+            Ok((_, s)) => assert!(false, "{}", s.0.as_str()),
+            _ => {}
+        };
     }
 }
