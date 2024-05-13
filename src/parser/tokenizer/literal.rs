@@ -5,8 +5,8 @@ use nom::{
     bytes::complete::{is_not, tag, take_while, take_while_m_n},
     character::{
         complete::{
-            alpha1, alphanumeric0, alphanumeric1, char, digit1, line_ending, multispace0, newline,
-            not_line_ending, one_of,
+            alpha1, alphanumeric0, alphanumeric1, char, digit1, hex_digit1, line_ending,
+            multispace0, newline, not_line_ending, one_of,
         },
         is_alphabetic,
     },
@@ -234,13 +234,47 @@ fn multiline_literal_string<'a, E: ParseError<&'a str> + ContextError<&'a str>>(
     Ok((i, LiteralString(content.to_string())))
 }
 
-// #[derive(Debug, PartialEq)]
-// struct LiteralString(String);
+fn integer_numeric_constant<'a, E: ParseError<&'a str> + ContextError<&'a str>>(
+    i: &'a str,
+) -> IResult<&'a str, String, E> {
+    let hex = context(
+        "integer_numeric_constant hex",
+        preceded(alt((tag("0x"), tag("0X"))), hex_digit1),
+    );
+    let int = context("integer_numeric_constant int", digit1);
+    let (i, s) = alt((hex, int))(i)?;
+    Ok((i, s.to_string()))
+}
 
-// fn literal_string<'a, E: ParseError<&'a str> + ContextError<&'a str>>(
-//     i: &'a str,
-// ) -> IResult<&'a str, LiteralString, E> {
-// }
+fn float_numeric_constant<'a, E: ParseError<&'a str> + ContextError<&'a str>>(
+    i: &'a str,
+) -> IResult<&'a str, String, E> {
+    let hex = context(
+        "float_numeric_constant hex",
+        take_while(|c: char| {
+            c.is_ascii_hexdigit() || ['x', 'X', '.', 'e', 'E', 'p', 'P', '-', '+'].contains(&c)
+        }),
+    );
+    let float = context(
+        "float_numeric_constant float",
+        take_while(|c: char| c.is_ascii_digit() || ['.', 'e', 'E', '-'].contains(&c)),
+    );
+    let (i, s) = alt((hex, float))(i)?;
+    Ok((i, s.to_string()))
+}
+
+#[derive(PartialEq, Debug)]
+struct NumericConstant(String);
+
+fn numeric_constant<'a, E: ParseError<&'a str> + ContextError<&'a str>>(
+    i: &'a str,
+) -> IResult<&'a str, NumericConstant, E> {
+    let (i, s) = context(
+        "numeric_constant",
+        alt((float_numeric_constant, integer_numeric_constant)),
+    )(i)?;
+    Ok((i, NumericConstant(s)))
+}
 
 #[cfg(test)]
 mod tests {
@@ -426,5 +460,45 @@ mod tests {
             Ok((_, s)) => assert!(false, "{}", s.0.as_str()),
             _ => {}
         };
+    }
+
+    #[test]
+    fn check_numeric_constant() {
+        assert_eq!(
+            numeric_constant::<VerboseError<&str>>("345"),
+            Ok(("", NumericConstant("345".into())))
+        );
+        assert_eq!(
+            numeric_constant::<VerboseError<&str>>("0xff"),
+            Ok(("", NumericConstant("0xff".into())))
+        );
+        assert_eq!(
+            numeric_constant::<VerboseError<&str>>("0XBEBADA"),
+            Ok(("", NumericConstant("0XBEBADA".into())))
+        );
+        assert_eq!(
+            numeric_constant::<VerboseError<&str>>("3.0"),
+            Ok(("", NumericConstant("3.0".into())))
+        );
+        assert_eq!(
+            numeric_constant::<VerboseError<&str>>("3.16e-2"),
+            Ok(("", NumericConstant("3.16e-2".into())))
+        );
+        assert_eq!(
+            numeric_constant::<VerboseError<&str>>("316e2"),
+            Ok(("", NumericConstant("316e2".into())))
+        );
+        assert_eq!(
+            numeric_constant::<VerboseError<&str>>("0x0.1E"),
+            Ok(("", NumericConstant("0x0.1E".into())))
+        );
+        assert_eq!(
+            numeric_constant::<VerboseError<&str>>("0xA23p-4"),
+            Ok(("", NumericConstant("0xA23p-4".into())))
+        );
+        assert_eq!(
+            numeric_constant::<VerboseError<&str>>("0x1.A23P+4"),
+            Ok(("", NumericConstant("0x1.A23P+4".into())))
+        );
     }
 }
