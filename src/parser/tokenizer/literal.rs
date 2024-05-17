@@ -39,7 +39,7 @@ impl std::fmt::Display for TokenizerError {
 impl std::error::Error for TokenizerError {}
 
 #[derive(Debug)]
-struct Identifier {
+pub(crate) struct Identifier {
     s: String,
 }
 
@@ -47,7 +47,7 @@ enum Token {
     Identifier(Identifier),
 }
 
-fn identifier<'a, E: ParseError<&'a str> + ContextError<&'a str>>(
+pub(crate) fn identifier<'a, E: ParseError<&'a str> + ContextError<&'a str>>(
     i: &'a str,
 ) -> IResult<&'a str, Identifier, E> {
     let (i, s) = context(
