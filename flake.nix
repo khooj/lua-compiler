@@ -2,16 +2,23 @@
   description = "rust workspace";
 
   inputs = {
-    nixpkgs.url = "github:nixos/nixpkgs/nixos-unstable";
     flake-utils.url = "github:numtide/flake-utils";
     rust-overlay.url = "github:oxalica/rust-overlay";
   };
 
-  outputs = { self, nixpkgs, rust-overlay, flake-utils, ... }:
+  outputs =
+    {
+      self,
+      nixpkgs,
+      rust-overlay,
+      flake-utils,
+      ...
+    }:
     let
       rust-version = "1.77.2";
     in
-    flake-utils.lib.eachDefaultSystem (system:
+    flake-utils.lib.eachDefaultSystem (
+      system:
       let
         overlays = [ rust-overlay.overlays.default ];
         pkgs = import nixpkgs { inherit system overlays; };
@@ -19,8 +26,11 @@
 
         buildInputs = with pkgs; [
           (rust-bin.stable.${rust-version}.default.override {
-              extensions =
-                [ "rust-src" "llvm-tools-preview" "rust-analysis" ];
+            extensions = [
+              "rust-src"
+              "llvm-tools-preview"
+              "rust-analysis"
+            ];
           })
           trunk
 
@@ -49,8 +59,12 @@
           webkitgtk
           librsvg
           hashrat
+          cargo-expand
         ];
-        nativeBuildInputs = with pkgs; [ pkg-config nixpkgs-fmt ];
+        nativeBuildInputs = with pkgs; [
+          pkg-config
+          nixpkgs-fmt
+        ];
         libs = with pkgs; [
           webkitgtk
           gtk3
@@ -66,7 +80,8 @@
 
       in
       rec {
-        devShell = with pkgs;
+        devShell =
+          with pkgs;
           mkShell {
             name = "rust";
             buildInputs = [ ] ++ buildInputs;
@@ -76,5 +91,6 @@
               export PATH=$PATH:$HOME/.cargo/bin:$PWD/app/node_modules/.bin
             '';
           };
-      });
+      }
+    );
 }

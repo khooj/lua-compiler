@@ -12,7 +12,7 @@ use nom::{
     },
     combinator::{cut, map, map_res, not, opt},
     error::{context, ContextError, FromExternalError, ParseError},
-    multi::{count, length_count, many0, many0_count, many1, many_m_n, separated_list0},
+    multi::{self, count, length_count, many0, many0_count, many1, many_m_n, separated_list0},
     sequence::{delimited, preceded, tuple},
     IResult,
 };
@@ -189,10 +189,7 @@ fn literal_string_content<'a, E: ParseError<&'a str> + ContextError<&'a str>>(
     Ok((i, res.into_iter().collect::<String>()))
 }
 
-#[derive(Debug, PartialEq)]
-struct LiteralString(String);
-
-fn literal_string<'a, E: ParseError<&'a str> + ContextError<&'a str>>(
+fn oneline_literal_string<'a, E: ParseError<&'a str> + ContextError<&'a str>>(
     i: &'a str,
 ) -> IResult<&'a str, LiteralString, E> {
     let single = context(
@@ -234,6 +231,18 @@ fn multiline_literal_string<'a, E: ParseError<&'a str> + ContextError<&'a str>>(
     Ok((i, LiteralString(content.to_string())))
 }
 
+#[derive(Debug, PartialEq)]
+pub struct LiteralString(String);
+
+pub fn literal_string<'a, E: ParseError<&'a str> + ContextError<&'a str>>(
+    i: &'a str,
+) -> IResult<&'a str, LiteralString, E> {
+    context(
+        "literal_string",
+        alt((oneline_literal_string, multiline_literal_string)),
+    )(i)
+}
+
 fn integer_numeric_constant<'a, E: ParseError<&'a str> + ContextError<&'a str>>(
     i: &'a str,
 ) -> IResult<&'a str, String, E> {
@@ -264,9 +273,9 @@ fn float_numeric_constant<'a, E: ParseError<&'a str> + ContextError<&'a str>>(
 }
 
 #[derive(PartialEq, Debug)]
-struct NumericConstant(String);
+pub struct NumericConstant(String);
 
-fn numeric_constant<'a, E: ParseError<&'a str> + ContextError<&'a str>>(
+pub fn numeric_constant<'a, E: ParseError<&'a str> + ContextError<&'a str>>(
     i: &'a str,
 ) -> IResult<&'a str, NumericConstant, E> {
     let (i, s) = context(

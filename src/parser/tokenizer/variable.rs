@@ -16,16 +16,27 @@ use nom::{
 };
 
 use super::literal::{self, Identifier};
+use super::expressions::{self, PrefixExp, prefix_exp, Expression, expression};
 
 #[derive(Debug)]
-pub(crate) struct Variable {
-    ident: Identifier,
+pub(crate) enum Variable {
+    Identifier(Identifier),
+    TableAccess(TableAccess),
 }
 
-// TODO: table variables
-pub(crate) fn variable<'a, E: ParseError<&'a str> + ContextError<&'a str>>(
+fn table_access<'a, E: ParseError<&'a str> + ContextError<&'a str>>(
+    i: &'a str,
+) -> IResult<&'a str, Variable, E> {
+    let (i, pe) = context("table_access_prefixexp", prefix_exp)(i)?;
+    let (i, s) = context("table_access", alt((
+        tuple((char('['), expression, char(']'))),
+        preceded(char('.'), literal::identifier),
+    )))(i)?;
+}
+
+pub(crate) fn identifier<'a, E: ParseError<&'a str> + ContextError<&'a str>>(
     i: &'a str,
 ) -> IResult<&'a str, Variable, E> {
     let (i, s) = context("variable_ident", literal::identifier)(i)?;
-    Ok((i, Variable { ident: s }))
+    Ok((i, Variable::Identifier(s)))
 }
