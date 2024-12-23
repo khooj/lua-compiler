@@ -4,7 +4,8 @@ use quote::{quote, ToTokens};
 use syn::parse::{Parse, ParseStream, Peek};
 use syn::punctuated::Punctuated;
 use syn::{
-    braced, bracketed, custom_punctuation, parse_macro_input, token, Ident, LitStr, Result, Token,
+    braced, bracketed, custom_punctuation, parse_macro_input, token, Ident, LitChar, LitStr,
+    Result, Token,
 };
 
 mod kw {
@@ -42,34 +43,50 @@ mod punct {
 }
 
 struct Terminal {
-    value: String,
+    pub value: char,
 }
+
 impl Parse for Terminal {
     fn parse(input: ParseStream) -> Result<Self> {
         let l: LitStr = input.parse()?;
-        Ok(Terminal { value: l.value() })
-        //}
-        //
-        //Err(syn::Error::new_spanned(l, "string literal expected"))
+        if l.value().len() != 1 {
+            return Err(syn::Error::new_spanned(
+                l,
+                format!("terminal should be 1 character"),
+            ));
+        }
+        Ok(Terminal {
+            value: l.value().chars().nth(0).unwrap(),
+        })
     }
 }
 
 impl Terminal {
     fn generate(&self, name: &Ident) -> TokenStream {
-        let lit = LitStr::new(&self.value, name.span());
+        let body = self.body(name);
         quote! {
+            #[derive(Debug)]
             pub struct #name {
-                lit: String,
+                value: String,
             }
 
             impl #name {
-                pub fn parse(input: &str) -> #name {
-                    if !input.starts_with(#lit) {
-                        panic!("unexpected terminal: {}", #lit);
-                    }
-                    #name { lit: #lit.to_string() }
+                pub fn parse(input: &str) -> NomResult<&str, Token> {
+                    let (input, ch) = #body(input)?;
+                    Ok((input, ch))
+                }
+
+                pub fn value(&self) -> &String {
+                    &self.value
                 }
             }
+        }
+    }
+
+    fn body(&self, name: &Ident) -> TokenStream {
+        let lit = LitChar::new(self.value, name.span());
+        quote! {
+            map(char(#lit), |t| Token::#name(#name{ value: t.to_string() }))
         }
     }
 }
@@ -83,6 +100,38 @@ impl Parse for RuleName {
         Ok(RuleName {
             name: rn.to_string(),
         })
+    }
+}
+
+impl RuleName {
+    fn ident(&self, name: &Ident) -> Ident {
+        Ident::new(&self.name.to_case(Case::UpperCamel), name.span())
+    }
+
+    fn generate(&self, name: &Ident) -> TokenStream {
+        let ident = self.ident(name);
+        let body = self.body(name);
+        quote! {
+            pub struct #name {}
+
+            impl #name {
+                pub fn parse(input: &str) -> NomResult<&str, Token> {
+                    let (input, parsed) = #body(input)?;
+                    Ok((input, parsed))
+                }
+
+                pub fn value(&self) -> String {
+                    unimplemented!()
+                }
+            }
+        }
+    }
+
+    fn body(&self, name: &Ident) -> TokenStream {
+        let ident = self.ident(name);
+        quote! {
+            <#ident>::parse
+        }
     }
 }
 
@@ -108,16 +157,51 @@ impl Parse for Alternatives {
 
 impl Alternatives {
     fn generate(&self, name: &Ident) -> TokenStream {
+        let body = self.body(name);
         quote! {
             pub struct #name {
-                //values: Vec<String>,
+                value: Box<Token>,
             }
 
             impl #name {
-                pub fn parse(input: &str) -> #name {
-                    #name {}
+                pub fn parse(input: &str) -> NomResult<&str, Token> {
+                    let (input, parsed_alt) = #body(input)?;
+                    Ok((input, parsed_alt))
+                }
+
+                pub fn value(&self) -> &Token {
+                    self.value.as_ref()
                 }
             }
+        }
+    }
+
+    fn body(&self, name: &Ident) -> TokenStream {
+        let mut tokens = TokenStream::new();
+        for (idx, choice) in self.choices.iter().enumerate() {
+            let b = match choice {
+                Rhs::Terminal(t) => {
+                    let lit = LitChar::new(t.value, name.span());
+                    quote! {
+                        map(char(#lit), |t| Token::Literal(Literal::from(t)))
+                    }
+                }
+                //Rhs::Optional(opt) => {
+                //    let body = opt.optional.body()
+                //    quote! {
+                //        map(opt())
+                //    }
+                //}
+                _ => choice.body(name),
+            };
+            let q = quote! {
+                #b,
+            };
+            tokens.extend(Some(q));
+        }
+
+        quote! {
+            map(alt((#tokens)), |ts| Token::#name(#name { value: Box::new(ts) }))
         }
     }
 }
@@ -142,6 +226,49 @@ impl Parse for Sequence {
     }
 }
 
+impl Sequence {
+    fn generate(&self, name: &Ident) -> TokenStream {
+        let body = self.body(name);
+        quote! {
+            pub struct #name {
+                value: Vec<Token>,
+            }
+
+            impl #name {
+                pub fn parse(input: &str) -> NomResult<&str, Token> {
+                    let (input, seq) = #body(input)?;
+                    Ok((input, seq))
+                }
+
+                pub fn value(&self) -> Vec<Token> {
+                    //self.value.clone()
+                    unimplemented!()
+                }
+            }
+        }
+    }
+
+    fn body(&self, name: &Ident) -> TokenStream {
+        let mut tokens = TokenStream::new();
+        for seq in self.seq.iter() {
+            let b = seq.body(name);
+            let q = quote! {
+                #b,
+            };
+            tokens.extend(Some(q));
+        }
+        let i = (0..self.seq.len()).map(syn::Index::from);
+        let sz = self.seq.len();
+        quote! {
+            map(tuple((#tokens)), |ts| {
+                let mut v = Vec::with_capacity(#sz);
+                #( v.push(ts.#i); )*
+                Token::#name(#name { value: v })
+            })
+        }
+    }
+}
+
 struct Optional {
     optional: Box<Rhs>,
 }
@@ -157,6 +284,31 @@ impl Parse for Optional {
     }
 }
 
+impl Optional {
+    fn generate(&self, name: &Ident) -> TokenStream {
+        let body = self.body(name);
+        quote! {
+            pub struct #name {
+                value: Box<Token>,
+            }
+
+            impl #name {
+                pub fn parse(input: &str) -> NomResult<&str, Token> {
+                    let (input, parsed_opt) = #body(input)?;
+                    Ok((input, Token::#name(#name { value: Box::new(parsed_opt) })))
+                }
+            }
+        }
+    }
+
+    fn body(&self, name: &Ident) -> TokenStream {
+        let b = self.optional.body(name);
+        quote! {
+            map(opt(#b), |t| Token::Optional(Optional { value: Box::new(t) }))
+        }
+    }
+}
+
 struct Repetition {
     rep: Box<Rhs>,
 }
@@ -167,6 +319,31 @@ impl Parse for Repetition {
         braced!(content in input);
         let p: Rhs = content.parse()?;
         Ok(Repetition { rep: Box::new(p) })
+    }
+}
+
+impl Repetition {
+    fn generate(&self, name: &Ident) -> TokenStream {
+        let body = self.body(name);
+        quote! {
+            pub struct #name {
+                value: Box<Token>,
+            }
+
+            impl #name {
+                pub fn parse(input: &str) -> NomResult<&str, Token> {
+                    let (input, rep) = #body(input)?;
+                    Ok((input, Token::#name(#name { value: Box::new(rep) })))
+                }
+            }
+        }
+    }
+
+    fn body(&self, name: &Ident) -> TokenStream {
+        let body = self.rep.body(name);
+        quote! {
+            map(many1(#body), |ts| Token::Repetition(Repetition { value: ts }))
+        }
     }
 }
 
@@ -223,6 +400,22 @@ impl Rhs {
         match self {
             Rhs::Terminal(t) => t.generate(name),
             Rhs::Alternatives(alt) => alt.generate(name),
+            Rhs::Optional(opt) => opt.generate(name),
+            Rhs::Repetition(rep) => rep.generate(name),
+            Rhs::Sequence(seq) => seq.generate(name),
+            Rhs::Rule(rn) => rn.generate(name),
+            _ => quote! {},
+        }
+    }
+
+    fn body(&self, name: &Ident) -> TokenStream {
+        match self {
+            Rhs::Terminal(t) => t.body(name),
+            Rhs::Alternatives(alt) => alt.body(name),
+            Rhs::Optional(opt) => opt.body(name),
+            Rhs::Repetition(rep) => rep.body(name),
+            Rhs::Sequence(seq) => seq.body(name),
+            Rhs::Rule(rn) => rn.body(name),
             _ => quote! {},
         }
     }
@@ -246,10 +439,15 @@ impl Parse for Rule {
 }
 
 impl Rule {
+    fn ident(&self) -> Ident {
+        Ident::new(
+            &self.name.to_string().to_case(Case::UpperCamel),
+            self.name.span(),
+        )
+    }
+
     fn generate_rule_parser(&self) -> TokenStream {
-        //let parser_name = &self.name;
-        let name = self.name.to_string().to_case(Case::UpperCamel);
-        let name = Ident::new(&name, self.name.span());
+        let name = self.ident();
         self.rhs.generate(&name)
 
         //quote! {
@@ -304,10 +502,113 @@ impl Parse for EbnfInput {
 #[proc_macro]
 pub fn ebnf(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
     let input = parse_macro_input!(input as EbnfInput);
-    input
+    let prelude = quote! {
+        use std::io::{Cursor, Read};
+        use nom::character::streaming::char;
+        use nom::{IResult as NomResult};
+        use nom::combinator::{map, opt};
+        use nom::branch::alt;
+        use nom::multi::many1;
+        use nom::sequence::tuple;
+    };
+    let enum_types = input
+        .rules
+        .iter()
+        .map(|r| {
+            let name = r.ident();
+            quote! {
+                #name(#name),
+            }
+        })
+        .collect::<TokenStream>();
+
+    //let token_parse = input
+    //    .rules
+    //    .iter()
+    //    .map(|r| {
+    //        let name = r.ident();
+    //        quote! {
+    //            Token::#name(t) => t.parse(input),
+    //        }
+    //    })
+    //    .collect::<TokenStream>();
+
+    let token_value = input
+        .rules
+        .iter()
+        .map(|r| {
+            let name = r.ident();
+            quote! {
+                Token::#name(t) => t.value(),
+            }
+        })
+        .collect::<TokenStream>();
+
+    let body = input
         .rules
         .into_iter()
         .map(|e| e.generate_rule_parser())
-        .collect::<TokenStream>()
-        .into()
+        .collect::<TokenStream>();
+
+    // TODO: support conjuction, unnamed inline rules (like `["+"|"-"]`)
+    let res = quote! {
+        #prelude
+
+        pub struct Literal {
+            value: String,
+        }
+
+        impl From<char> for Literal {
+            fn from(value: char) -> Self {
+                Literal { value: value.to_string() }
+            }
+        }
+
+        pub struct Optional {
+            value: Box<Option<Token>>,
+        }
+
+        impl From<Option<Token>> for Optional {
+            fn from(value: Option<Token>) -> Self {
+                Optional { value: Box::new(value) }
+            }
+        }
+
+        pub struct Repetition {
+            value: Vec<Token>,
+        }
+
+        impl From<Vec<Token>> for Repetition {
+            fn from(value: Vec<Token>) -> Self {
+                Repetition { value }
+            }
+        }
+
+        pub enum Token {
+            #enum_types
+            Literal(Literal),
+            Optional(Optional),
+            Repetition(Repetition),
+        }
+
+        impl Token {
+            //pub fn parse(&self, input: &str) -> NomResult<&str, Token> {
+            //    match self {
+            //        #token_parse
+            //        _ => panic!("parse should be used for named rules"),
+            //    }
+            //}
+
+            pub fn value<T>(&self) -> T {
+                match self {
+                    //#token_value
+                    _ => unimplemented!()
+                }
+            }
+        }
+
+        #body
+    };
+
+    res.into()
 }
