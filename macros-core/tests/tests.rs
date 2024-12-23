@@ -9,7 +9,10 @@ pub fn pass() {
 pub fn simple_term() {
     ebnf! {
         simple_term = "0";
-    }
+    };
+
+    let d = SimpleTerm::parse("0");
+    assert_eq!(d.lit, "0");
 }
 
 #[test]

@@ -1,5 +1,6 @@
-use proc_macro2::{TokenStream, TokenTree};
-use quote::quote;
+use convert_case::{Case, Casing};
+use proc_macro2::{Span, TokenStream, TokenTree};
+use quote::{quote, ToTokens};
 use syn::parse::{Parse, ParseStream, Peek};
 use syn::punctuated::Punctuated;
 use syn::{
@@ -53,6 +54,26 @@ impl Parse for Terminal {
     }
 }
 
+impl Terminal {
+    fn generate(&self, name: &Ident) -> TokenStream {
+        let lit = LitStr::new(&self.value, name.span());
+        quote! {
+            pub struct #name {
+                lit: String,
+            }
+
+            impl #name {
+                pub fn parse(input: &str) -> #name {
+                    if !input.starts_with(#lit) {
+                        panic!("unexpected terminal: {}", #lit);
+                    }
+                    #name { lit: #lit.to_string() }
+                }
+            }
+        }
+    }
+}
+
 struct RuleName {
     name: String,
 }
@@ -82,6 +103,22 @@ impl Parse for Alternatives {
         }
 
         Ok(Alternatives { choices: segments })
+    }
+}
+
+impl Alternatives {
+    fn generate(&self, name: &Ident) -> TokenStream {
+        quote! {
+            pub struct #name {
+                //values: Vec<String>,
+            }
+
+            impl #name {
+                pub fn parse(input: &str) -> #name {
+                    #name {}
+                }
+            }
+        }
     }
 }
 
@@ -181,7 +218,15 @@ impl Parse for Rhs {
     }
 }
 
-impl Rhs {}
+impl Rhs {
+    fn generate(&self, name: &Ident) -> TokenStream {
+        match self {
+            Rhs::Terminal(t) => t.generate(name),
+            Rhs::Alternatives(alt) => alt.generate(name),
+            _ => quote! {},
+        }
+    }
+}
 
 struct Rule {
     name: Ident,
@@ -200,7 +245,26 @@ impl Parse for Rule {
     }
 }
 
-impl Rule {}
+impl Rule {
+    fn generate_rule_parser(&self) -> TokenStream {
+        //let parser_name = &self.name;
+        let name = self.name.to_string().to_case(Case::UpperCamel);
+        let name = Ident::new(&name, self.name.span());
+        self.rhs.generate(&name)
+
+        //quote! {
+        //    pub struct #parser_name {
+        //
+        //    }
+        //
+        //    impl #parser_name {
+        //        pub fn parse(input: &str) -> Self {
+        //            #parser_body
+        //        }
+        //    }
+        //}
+    }
+}
 
 fn parse_until<E: Peek>(input: ParseStream, end: E) -> Result<TokenStream> {
     let mut tokens = TokenStream::new();
@@ -211,7 +275,9 @@ fn parse_until<E: Peek>(input: ParseStream, end: E) -> Result<TokenStream> {
     Ok(tokens)
 }
 
-struct EbnfInput {}
+struct EbnfInput {
+    rules: Vec<Rule>,
+}
 
 impl Parse for EbnfInput {
     fn parse(input: ParseStream) -> Result<Self> {
@@ -231,12 +297,17 @@ impl Parse for EbnfInput {
             }
         }
 
-        Ok(EbnfInput {})
+        Ok(EbnfInput { rules })
     }
 }
 
 #[proc_macro]
 pub fn ebnf(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
-    parse_macro_input!(input as EbnfInput);
-    proc_macro::TokenStream::new()
+    let input = parse_macro_input!(input as EbnfInput);
+    input
+        .rules
+        .into_iter()
+        .map(|e| e.generate_rule_parser())
+        .collect::<TokenStream>()
+        .into()
 }
