@@ -6,33 +6,62 @@ pub fn pass() {
 }
 
 #[test]
-pub fn terminals() {
+pub fn simple_term() {
     ebnf! {
-        ebnf_sep = ;
-        digit ::= 0 | 1 | 2 | 3;
+        simple_term = "0";
     }
 }
 
 #[test]
-pub fn err_rule() {
+pub fn terminals() {
     ebnf! {
-        ebnf_sep = ;
-        err_rule <- 0 | 1 | 2;
+        digit = "0" | "1" | "2" | "3";
     }
 }
+
+//#[ignore]
+//#[test]
+//pub fn err_rule() {
+//    ebnf! {
+//        err_rule <- "0" | "1" | "2";
+//    }
+//}
 
 #[test]
 pub fn or_rule() {
     ebnf! {
-        ebnf_sep = ;
-        plusminus ::= [+|-];
+        signs = "+" | "-";
+        plusminus = [signs];
     }
 }
 
 #[test]
 pub fn repetition() {
     ebnf! {
-        ebnf_sep = ;
-        integer ::= digit{digit};
+        integer = digit, {digit};
+        many_rep = digit, {digit | "a" | "b"};
+    }
+}
+
+#[test]
+pub fn char_literals() {
+    ebnf! {
+        char = "c" | "a";
+        string = "" | char, {char};
+    }
+}
+
+#[test]
+pub fn simple_seq() {
+    ebnf! {
+        s = "a", "b", "c";
+    }
+}
+
+#[test]
+pub fn char_seq() {
+    ebnf! {
+        char = "c" | "a";
+        seq_s = char, char, char;
     }
 }

@@ -2,7 +2,9 @@ use proc_macro2::{TokenStream, TokenTree};
 use quote::quote;
 use syn::parse::{Parse, ParseStream, Peek};
 use syn::punctuated::Punctuated;
-use syn::{parse_macro_input, Expr, Ident, Result, Token};
+use syn::{
+    braced, bracketed, custom_punctuation, parse_macro_input, token, Ident, LitStr, Result, Token,
+};
 
 mod kw {
     use syn::custom_keyword;
@@ -38,48 +40,190 @@ mod punct {
     custom_punctuation!(RuleDef, ::=);
 }
 
+struct Terminal {
+    value: String,
+}
+impl Parse for Terminal {
+    fn parse(input: ParseStream) -> Result<Self> {
+        let l: LitStr = input.parse()?;
+        Ok(Terminal { value: l.value() })
+        //}
+        //
+        //Err(syn::Error::new_spanned(l, "string literal expected"))
+    }
+}
+
+struct RuleName {
+    name: String,
+}
+impl Parse for RuleName {
+    fn parse(input: ParseStream) -> Result<Self> {
+        let rn: Ident = input.parse()?;
+        Ok(RuleName {
+            name: rn.to_string(),
+        })
+    }
+}
+
+struct Alternatives {
+    choices: Punctuated<Rhs, punct::OrSep>,
+}
+
+impl Parse for Alternatives {
+    fn parse(input: ParseStream) -> Result<Self> {
+        let mut segments = Punctuated::new();
+        let first = parse_until(input, punct::OrSep)?;
+        segments.push_value(syn::parse2(first)?);
+
+        while input.peek(punct::OrSep) {
+            segments.push_punct(input.parse()?);
+            let second = parse_until(input, punct::OrSep)?;
+            segments.push_value(syn::parse2(second)?);
+        }
+
+        Ok(Alternatives { choices: segments })
+    }
+}
+
+struct Sequence {
+    seq: Punctuated<Rhs, Token![,]>,
+}
+
+impl Parse for Sequence {
+    fn parse(input: ParseStream) -> Result<Self> {
+        let mut segments = Punctuated::new();
+        let first = parse_until(input, Token![,])?;
+        segments.push_value(syn::parse2(first)?);
+
+        while input.peek(Token![,]) {
+            segments.push_punct(input.parse()?);
+            let second = parse_until(input, Token![,])?;
+            segments.push_value(syn::parse2(second)?);
+        }
+
+        Ok(Sequence { seq: segments })
+    }
+}
+
+struct Optional {
+    optional: Box<Rhs>,
+}
+
+impl Parse for Optional {
+    fn parse(input: ParseStream) -> Result<Self> {
+        let content;
+        bracketed!(content in input);
+        let p: Rhs = content.parse()?;
+        Ok(Optional {
+            optional: Box::new(p),
+        })
+    }
+}
+
+struct Repetition {
+    rep: Box<Rhs>,
+}
+
+impl Parse for Repetition {
+    fn parse(input: ParseStream) -> Result<Self> {
+        let content;
+        braced!(content in input);
+        let p: Rhs = content.parse()?;
+        Ok(Repetition { rep: Box::new(p) })
+    }
+}
+
+enum Rhs {
+    Terminal(Terminal),
+    Rule(RuleName),
+    Alternatives(Alternatives),
+    Sequence(Sequence),
+    Optional(Optional),
+    Repetition(Repetition),
+    End,
+}
+
+impl Parse for Rhs {
+    fn parse(input: ParseStream) -> Result<Self> {
+        let lookahead = input.lookahead1();
+
+        if input.peek2(punct::OrSep) {
+            let alt: Alternatives = input.parse()?;
+            return Ok(Rhs::Alternatives(alt));
+        }
+
+        if input.peek2(Token![,]) {
+            let seq: Sequence = input.parse()?;
+            return Ok(Rhs::Sequence(seq));
+        }
+
+        if lookahead.peek(token::Brace) {
+            let rep: Repetition = input.parse()?;
+            return Ok(Rhs::Repetition(rep));
+        }
+
+        if lookahead.peek(token::Bracket) {
+            let opt: Optional = input.parse()?;
+            return Ok(Rhs::Optional(opt));
+        }
+
+        if lookahead.peek(Ident) {
+            let rn: RuleName = input.parse()?;
+            return Ok(Rhs::Rule(rn));
+        }
+
+        if lookahead.peek(LitStr) {
+            let l: Terminal = input.parse()?;
+            return Ok(Rhs::Terminal(l));
+        }
+
+        Ok(Rhs::End)
+    }
+}
+
+impl Rhs {}
+
 struct Rule {
     name: Ident,
-    rhs: Expr,
+    rhs: Rhs,
 }
 
 impl Parse for Rule {
     fn parse(input: ParseStream) -> Result<Self> {
-        let first = Rule::parse_until(input, punct::RuleDef)?;
+        let first = parse_until(input, Token![=])?;
         let name: Ident = syn::parse2(first)?;
-        let _: punct::RuleDef = input.parse()?;
-        let rhs: Expr = input.parse()?;
+        let _: Token![=] = input.parse()?;
+        let ts = parse_until(input, Token![;])?;
+        let rhs: Rhs = syn::parse2(ts)?;
 
         Ok(Rule { name, rhs })
     }
 }
 
-impl Rule {
-    fn parse_until<E: Peek>(input: ParseStream, end: E) -> Result<TokenStream> {
-        let mut tokens = TokenStream::new();
-        while !input.is_empty() && !input.peek(end) {
-            let next: TokenTree = input.parse()?;
-            tokens.extend(Some(next));
-        }
-        Ok(tokens)
+impl Rule {}
+
+fn parse_until<E: Peek>(input: ParseStream, end: E) -> Result<TokenStream> {
+    let mut tokens = TokenStream::new();
+    while !input.is_empty() && !input.peek(end) {
+        let next: TokenTree = input.parse()?;
+        tokens.extend(Some(next));
     }
+    Ok(tokens)
 }
 
 struct EbnfInput {}
 
 impl Parse for EbnfInput {
     fn parse(input: ParseStream) -> Result<Self> {
-        println!("full input: {}", input.to_string());
-
-        let ebnf_sep: EbnfSep = input.parse()?;
-
-        println!("sep for ebnf: {}", ebnf_sep.sep_token.to_string());
+        //let ebnf_sep: EbnfSep = input.parse()?;
+        //
+        //println!("sep for ebnf: {}", ebnf_sep.sep_token.to_string());
 
         let mut rules = vec![];
         while !input.is_empty() {
             rules.push(input.parse::<Rule>()?);
             let end: TokenTree = input.parse()?;
-            if end.to_string() != ebnf_sep.sep_token.to_string() {
+            if end.to_string() != ";" {
                 return Err(syn::Error::new_spanned(
                     end.clone(),
                     format!("wrong rules separator {}", end),
