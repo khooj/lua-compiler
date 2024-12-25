@@ -1,46 +1,26 @@
 use macros_core::ebnf;
 
-//#[test]
-//pub fn simple_term() {
-//    ebnf! {
-//        simple_term = "0";
-//    };
-//
-//    let (_, d) = SimpleTerm::parse("0").unwrap();
-//    assert_eq!(d.lit, '0');
-//}
-//
-//#[test]
-//pub fn terminals() {
-//    ebnf! {
-//        digit = "0" | "1" | "2" | "3";
-//    }
-//}
-
 #[test]
-fn simple_lang() {
-    //impl From<i32> for str {
-    //    fn from(value: T) -> Self {
-    //
-    //    }
-    //}
+pub fn simple_term() {
     ebnf! {
-        digit = "0" | "1" | "2" | "3";
-        plusminus = "+" | "-";
-        integer = [plusminus], digit, {digit};
+        simple_term = "0";
     };
 
-    let (_, d) = Digit::parse("1").unwrap();
-    assert!(matches!(d, Token::Digit(_)));
-    //
-    //let (_, d) = Digit::parse("3").unwrap();
-    //assert_eq!(d.value, "3");
-    //
-    //let (_, i) = Integer::parse("1230").unwrap();
-    //assert_eq!(i.value, "1230");
-    //
-    //let (_, i) = Integer::parse("+1230").unwrap();
-    //assert_eq!(i.value, "+1230");
+    let (_, st) = SimpleTerm::parse("0").unwrap();
+    assert_eq!(st.value.value, "0");
+}
+
+#[test]
+pub fn terminals() {
+    ebnf! {
+        digit = "0" | "1" | "2" | "3";
+    };
+
+    let (_, _) = Digit::parse("1").unwrap();
+    let (_, _) = Digit::parse("2").unwrap();
+    let (_, _) = Digit::parse("3").unwrap();
+    let (_, _) = Digit::parse("0").unwrap();
+    assert!(Digit::parse("5").is_err());
 }
 
 #[test]
@@ -67,41 +47,74 @@ fn cursor_check() {
 //    }
 //}
 
-//#[test]
-//pub fn or_rule() {
-//    ebnf! {
-//        signs = "+" | "-";
-//        plusminus = [signs];
-//    }
-//}
-//
-//#[test]
-//pub fn repetition() {
-//    ebnf! {
-//        integer = digit, {digit};
-//        many_rep = digit, {digit | "a" | "b"};
-//    }
-//}
-//
-//#[test]
-//pub fn char_literals() {
-//    ebnf! {
-//        char = "c" | "a";
-//        string = char, {char};
-//    }
-//}
-//
-//#[test]
-//pub fn simple_seq() {
-//    ebnf! {
-//        s = "a", "b", "c";
-//    }
-//}
-//
-//#[test]
-//pub fn char_seq() {
-//    ebnf! {
-//        char = "c" | "a";
-//        seq_s = char, char, char;
-//    }
-//}
+#[test]
+pub fn or_rule() {
+    ebnf! {
+        signs = "+" | "-";
+        plusminus = [signs];
+    };
+}
+
+#[test]
+pub fn simple_repetition() {
+    ebnf! {
+        digit = "0" | "1";
+        integer = digit, {digit};
+    };
+
+    let (_, _) = Integer::parse("10").unwrap();
+}
+
+#[test]
+pub fn simple_seq() {
+    ebnf! {
+        s = "a", "b", "c";
+    };
+
+    let (_, _) = S::parse("abc").unwrap();
+}
+
+#[test]
+pub fn char_seq() {
+    ebnf! {
+        char = "c" | "a";
+        seq_s = char, char, char;
+    };
+
+    let (_, _) = SeqS::parse("cac").unwrap();
+}
+
+#[test]
+fn simple_lang() {
+    //impl From<i32> for str {
+    //    fn from(value: T) -> Self {
+    //
+    //    }
+    //}
+    ebnf! {
+        digit = "0" | "1" | "2" | "3";
+        plusminus = "+" | "-";
+        pm_opt  = [plusminus];
+        integer = [plusminus], digit, {digit};
+        float = [plusminus], digit, {digit}, ".", digit, {digit};
+    };
+
+    let (_, d) = Digit::parse_token("1").unwrap();
+    assert!(matches!(d, Token::Digit(_)));
+    println!("{:?}", d);
+
+    let (_, _) = Plusminus::parse("+").unwrap();
+    let (_, _) = Plusminus::parse("-").unwrap();
+    let (_, _) = PmOpt::parse("+").unwrap();
+    let (_, _) = PmOpt::parse("-").unwrap();
+    let (_, _) = PmOpt::parse("").unwrap();
+    //
+    //let (_, d) = Digit::parse("3").unwrap();
+    //assert_eq!(d.value, "3");
+    //
+    //let (_, i) = Integer::parse("1230").unwrap();
+    //assert_eq!(i.value, "1230");
+    //
+    let (_, i) = Integer::parse("11").unwrap();
+    println!("{:?}", i);
+}

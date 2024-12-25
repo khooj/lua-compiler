@@ -63,30 +63,36 @@ impl Parse for Terminal {
 
 impl Terminal {
     fn generate(&self, name: &Ident) -> TokenStream {
-        let body = self.body(name);
+        let b = self.parse_func(name.span());
         quote! {
             #[derive(Debug)]
             pub struct #name {
-                value: String,
+                value: Literal,
             }
 
             impl #name {
-                pub fn parse(input: &str) -> NomResult<&str, Token> {
-                    let (input, ch) = #body(input)?;
-                    Ok((input, ch))
+                pub fn parse_token(input: &str) -> NomResult<&str, Token> {
+                    map(<#name>::parse, Token::#name)(input)
                 }
 
-                pub fn value(&self) -> &String {
-                    &self.value
+                pub fn parse(input: &str) -> NomResult<&str, #name> {
+                    map(#b, |l| #name { value: l })(input)
                 }
             }
         }
     }
 
-    fn body(&self, name: &Ident) -> TokenStream {
-        let lit = LitChar::new(self.value, name.span());
+    fn parse_func(&self, span: Span) -> TokenStream {
+        let lit = LitChar::new(self.value, span);
         quote! {
-            map(char(#lit), |t| Token::#name(#name{ value: t.to_string() }))
+            Literal::parse_lit(#lit)
+        }
+    }
+
+    fn parse_func_token(&self, span: Span) -> TokenStream {
+        let ts = self.parse_func(span);
+        quote! {
+            map(#ts, Token::Literal)
         }
     }
 }
@@ -104,33 +110,34 @@ impl Parse for RuleName {
 }
 
 impl RuleName {
-    fn ident(&self, name: &Ident) -> Ident {
-        Ident::new(&self.name.to_case(Case::UpperCamel), name.span())
+    fn ident(&self, span: Span) -> Ident {
+        Ident::new(&self.name.to_case(Case::UpperCamel), span)
     }
 
     fn generate(&self, name: &Ident) -> TokenStream {
-        let ident = self.ident(name);
-        let body = self.body(name);
+        let ident = self.ident(name.span());
         quote! {
-            pub struct #name {}
+            #[derive(Debug)]
+            pub struct #name {
+                value: #ident,
+            }
 
             impl #name {
-                pub fn parse(input: &str) -> NomResult<&str, Token> {
-                    let (input, parsed) = #body(input)?;
-                    Ok((input, parsed))
+                pub fn parse_token(input: &str) -> NomResult<&str, Token> {
+                    map(<#name>::parse, Token::#name)(input)
                 }
 
-                pub fn value(&self) -> String {
-                    unimplemented!()
+                pub fn parse(input: &str) -> NomResult<&str, #name> {
+                    map(<#ident>::parse, |rn| #name { value: rn })(input)
                 }
             }
         }
     }
 
-    fn body(&self, name: &Ident) -> TokenStream {
-        let ident = self.ident(name);
+    fn parse_func_token(&self, span: Span) -> TokenStream {
+        let ident = self.ident(span);
         quote! {
-            <#ident>::parse
+            <#ident>::parse_token
         }
     }
 }
@@ -157,51 +164,42 @@ impl Parse for Alternatives {
 
 impl Alternatives {
     fn generate(&self, name: &Ident) -> TokenStream {
-        let body = self.body(name);
+        let body = self.body(name.span());
         quote! {
+            #[derive(Debug)]
             pub struct #name {
-                value: Box<Token>,
+                value: Alternatives,
             }
 
             impl #name {
-                pub fn parse(input: &str) -> NomResult<&str, Token> {
-                    let (input, parsed_alt) = #body(input)?;
-                    Ok((input, parsed_alt))
+                pub fn parse_token(input: &str) -> NomResult<&str, Token> {
+                    map(<#name>::parse, Token::#name)(input)
                 }
 
-                pub fn value(&self) -> &Token {
-                    self.value.as_ref()
+                pub fn parse(input: &str) -> NomResult<&str, #name> {
+                    map(#body, |v| #name { value: v })(input)
                 }
             }
         }
     }
 
-    fn body(&self, name: &Ident) -> TokenStream {
+    fn parse_func_token(&self, span: Span) -> TokenStream {
+        let body = self.body(span);
+        quote! {
+            map(#body, Token::Alternatives)
+        }
+    }
+
+    fn body(&self, span: Span) -> TokenStream {
         let mut tokens = TokenStream::new();
-        for (idx, choice) in self.choices.iter().enumerate() {
-            let b = match choice {
-                Rhs::Terminal(t) => {
-                    let lit = LitChar::new(t.value, name.span());
-                    quote! {
-                        map(char(#lit), |t| Token::Literal(Literal::from(t)))
-                    }
-                }
-                //Rhs::Optional(opt) => {
-                //    let body = opt.optional.body()
-                //    quote! {
-                //        map(opt())
-                //    }
-                //}
-                _ => choice.body(name),
-            };
-            let q = quote! {
-                #b,
-            };
+        for choice in self.choices.iter() {
+            let b = choice.parse_func_token(span.clone());
+            let q = quote! { #b, };
             tokens.extend(Some(q));
         }
 
         quote! {
-            map(alt((#tokens)), |ts| Token::#name(#name { value: Box::new(ts) }))
+            Alternatives::parse(alt((#tokens)))
         }
     }
 }
@@ -228,33 +226,37 @@ impl Parse for Sequence {
 
 impl Sequence {
     fn generate(&self, name: &Ident) -> TokenStream {
-        let body = self.body(name);
+        let body = self.body(name.span());
         quote! {
+            #[derive(Debug)]
             pub struct #name {
-                value: Vec<Token>,
+                value: Sequence,
             }
 
             impl #name {
-                pub fn parse(input: &str) -> NomResult<&str, Token> {
-                    let (input, seq) = #body(input)?;
-                    Ok((input, seq))
+                pub fn parse_token(input: &str) -> NomResult<&str, Token> {
+                    map(<#name>::parse, Token::#name)(input)
                 }
 
-                pub fn value(&self) -> Vec<Token> {
-                    //self.value.clone()
-                    unimplemented!()
+                pub fn parse(input: &str) -> NomResult<&str, #name> {
+                    map(#body, |v| #name { value: v })(input)
                 }
             }
         }
     }
 
-    fn body(&self, name: &Ident) -> TokenStream {
+    fn parse_func_token(&self, span: Span) -> TokenStream {
+        let body = self.body(span);
+        quote! {
+            map(#body, Token::Sequence)
+        }
+    }
+
+    fn body(&self, span: Span) -> TokenStream {
         let mut tokens = TokenStream::new();
-        for seq in self.seq.iter() {
-            let b = seq.body(name);
-            let q = quote! {
-                #b,
-            };
+        for it in self.seq.iter() {
+            let b = it.parse_func_token(span.clone());
+            let q = quote! { #b, };
             tokens.extend(Some(q));
         }
         let i = (0..self.seq.len()).map(syn::Index::from);
@@ -263,7 +265,7 @@ impl Sequence {
             map(tuple((#tokens)), |ts| {
                 let mut v = Vec::with_capacity(#sz);
                 #( v.push(ts.#i); )*
-                Token::#name(#name { value: v })
+                Sequence { value: v }
             })
         }
     }
@@ -286,25 +288,36 @@ impl Parse for Optional {
 
 impl Optional {
     fn generate(&self, name: &Ident) -> TokenStream {
-        let body = self.body(name);
+        let body = self.body(name.span());
         quote! {
+            #[derive(Debug)]
             pub struct #name {
-                value: Box<Token>,
+                value: Optional,
             }
 
             impl #name {
-                pub fn parse(input: &str) -> NomResult<&str, Token> {
-                    let (input, parsed_opt) = #body(input)?;
-                    Ok((input, Token::#name(#name { value: Box::new(parsed_opt) })))
+                pub fn parse_token(input: &str) -> NomResult<&str, Token> {
+                    map(<#name>::parse, Token::#name)(input)
+                }
+
+                pub fn parse(input: &str) -> NomResult<&str, #name> {
+                    map(#body, |v| #name { value: v })(input)
                 }
             }
         }
     }
 
-    fn body(&self, name: &Ident) -> TokenStream {
-        let b = self.optional.body(name);
+    fn parse_func_token(&self, span: Span) -> TokenStream {
+        let body = self.body(span);
         quote! {
-            map(opt(#b), |t| Token::Optional(Optional { value: Box::new(t) }))
+            map(#body, Token::Optional)
+        }
+    }
+
+    fn body(&self, span: Span) -> TokenStream {
+        let b = self.optional.parse_func_token(span);
+        quote! {
+            map(opt(#b), |t| Optional { value: Box::new(t) })
         }
     }
 }
@@ -324,25 +337,36 @@ impl Parse for Repetition {
 
 impl Repetition {
     fn generate(&self, name: &Ident) -> TokenStream {
-        let body = self.body(name);
+        let body = self.parse_func(name.span());
         quote! {
+            #[derive(Debug)]
             pub struct #name {
-                value: Box<Token>,
+                value: Repetition,
             }
 
             impl #name {
-                pub fn parse(input: &str) -> NomResult<&str, Token> {
-                    let (input, rep) = #body(input)?;
-                    Ok((input, Token::#name(#name { value: Box::new(rep) })))
+                pub fn parse_token(input: &str) -> NomResult<&str, Token> {
+                    map(<#name>::parse, Token::#name)(input)
+                }
+
+                pub fn parse(input: &str) -> NomResult<&str, #name> {
+                    map(#body, |v| #name { value: v })(input)
                 }
             }
         }
     }
 
-    fn body(&self, name: &Ident) -> TokenStream {
-        let body = self.rep.body(name);
+    fn parse_func(&self, span: Span) -> TokenStream {
+        let body = self.rep.parse_func_token(span);
         quote! {
-            map(many1(#body), |ts| Token::Repetition(Repetition { value: ts }))
+            map(many1(#body), |ts| Repetition { value: ts })
+        }
+    }
+
+    fn parse_func_token(&self, span: Span) -> TokenStream {
+        let body = self.parse_func(span);
+        quote! {
+            map(#body, Token::Repetition)
         }
     }
 }
@@ -354,7 +378,6 @@ enum Rhs {
     Sequence(Sequence),
     Optional(Optional),
     Repetition(Repetition),
-    End,
 }
 
 impl Parse for Rhs {
@@ -386,12 +409,7 @@ impl Parse for Rhs {
             return Ok(Rhs::Rule(rn));
         }
 
-        if lookahead.peek(LitStr) {
-            let l: Terminal = input.parse()?;
-            return Ok(Rhs::Terminal(l));
-        }
-
-        Ok(Rhs::End)
+        Ok(Rhs::Terminal(input.parse()?))
     }
 }
 
@@ -404,19 +422,17 @@ impl Rhs {
             Rhs::Repetition(rep) => rep.generate(name),
             Rhs::Sequence(seq) => seq.generate(name),
             Rhs::Rule(rn) => rn.generate(name),
-            _ => quote! {},
         }
     }
 
-    fn body(&self, name: &Ident) -> TokenStream {
+    fn parse_func_token(&self, span: Span) -> TokenStream {
         match self {
-            Rhs::Terminal(t) => t.body(name),
-            Rhs::Alternatives(alt) => alt.body(name),
-            Rhs::Optional(opt) => opt.body(name),
-            Rhs::Repetition(rep) => rep.body(name),
-            Rhs::Sequence(seq) => seq.body(name),
-            Rhs::Rule(rn) => rn.body(name),
-            _ => quote! {},
+            Rhs::Terminal(t) => t.parse_func_token(span),
+            Rhs::Rule(rn) => rn.parse_func_token(span),
+            Rhs::Alternatives(alt) => alt.parse_func_token(span),
+            Rhs::Sequence(seq) => seq.parse_func_token(span),
+            Rhs::Optional(opt) => opt.parse_func_token(span),
+            Rhs::Repetition(rep) => rep.parse_func_token(span),
         }
     }
 }
@@ -554,6 +570,7 @@ pub fn ebnf(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
     let res = quote! {
         #prelude
 
+        #[derive(Debug)]
         pub struct Literal {
             value: String,
         }
@@ -564,6 +581,17 @@ pub fn ebnf(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
             }
         }
 
+        impl Literal {
+            //fn parse(input: &str) -> NomResult<&str, Literal> {
+            //
+            //}
+
+            fn parse_lit<'a>(lit: char) -> impl FnMut(&'a str) -> NomResult<&'a str, Literal> {
+                map(char(lit), |t| Literal { value: t.to_string() })
+            }
+        }
+
+        #[derive(Debug)]
         pub struct Optional {
             value: Box<Option<Token>>,
         }
@@ -574,6 +602,7 @@ pub fn ebnf(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
             }
         }
 
+        #[derive(Debug)]
         pub struct Repetition {
             value: Vec<Token>,
         }
@@ -584,11 +613,32 @@ pub fn ebnf(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
             }
         }
 
+        #[derive(Debug)]
+        pub struct Alternatives {
+            value: Box<Token>,
+        }
+
+        impl Alternatives {
+            fn parse<'a, F: 'a>(alts: F) -> impl FnMut(&'a str) -> NomResult<&'a str, Alternatives>
+                where F: FnMut(&'a str) -> NomResult<&'a str, Token>
+            {
+                map(alts, |ts| Alternatives { value: Box::new(ts) })
+            }
+        }
+
+        #[derive(Debug)]
+        pub struct Sequence {
+            value: Vec<Token>,
+        }
+
+        #[derive(Debug)]
         pub enum Token {
             #enum_types
             Literal(Literal),
             Optional(Optional),
             Repetition(Repetition),
+            Alternatives(Alternatives),
+            Sequence(Sequence),
         }
 
         impl Token {
