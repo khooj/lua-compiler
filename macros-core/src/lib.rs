@@ -322,8 +322,14 @@ impl Optional {
     }
 }
 
+enum RepeatType {
+    ZeroOrMore,
+    OneOrMore,
+}
+
 struct Repetition {
     rep: Box<Rhs>,
+    repeat: RepeatType,
 }
 
 impl Parse for Repetition {
@@ -331,7 +337,21 @@ impl Parse for Repetition {
         let content;
         braced!(content in input);
         let p: Rhs = content.parse()?;
-        Ok(Repetition { rep: Box::new(p) })
+
+        let repeat = if input.peek(Token![*]) {
+            let _: Token![*] = input.parse()?;
+            RepeatType::ZeroOrMore
+        } else if input.peek(Token![+]) {
+            let _: Token![+] = input.parse()?;
+            RepeatType::OneOrMore
+        } else {
+            panic!("unknown seq char");
+        };
+
+        Ok(Repetition {
+            rep: Box::new(p),
+            repeat,
+        })
     }
 }
 
@@ -358,9 +378,11 @@ impl Repetition {
 
     fn parse_func(&self, span: Span) -> TokenStream {
         let body = self.rep.parse_func_token(span);
-        quote! {
-            map(many1(#body), |ts| Repetition { value: ts })
-        }
+        let rep = match self.repeat {
+            RepeatType::OneOrMore => quote! { many1(#body) },
+            RepeatType::ZeroOrMore => quote! { many0(#body) },
+        };
+        quote! { map(#rep, |ts| Repetition { value: ts }) }
     }
 
     fn parse_func_token(&self, span: Span) -> TokenStream {
@@ -520,11 +542,11 @@ pub fn ebnf(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
     let input = parse_macro_input!(input as EbnfInput);
     let prelude = quote! {
         use std::io::{Cursor, Read};
-        use nom::character::streaming::char;
+        use nom::character::complete::char;
         use nom::{IResult as NomResult};
         use nom::combinator::{map, opt};
         use nom::branch::alt;
-        use nom::multi::many1;
+        use nom::multi::{many1, many0};
         use nom::sequence::tuple;
     };
     let enum_types = input

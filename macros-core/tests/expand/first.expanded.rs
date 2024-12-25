@@ -1,10 +1,10 @@
 use macros_core::ebnf;
 use std::io::{Cursor, Read};
-use nom::character::streaming::char;
+use nom::character::complete::char;
 use nom::IResult as NomResult;
 use nom::combinator::{map, opt};
 use nom::branch::alt;
-use nom::multi::many1;
+use nom::multi::{many1, many0};
 use nom::sequence::tuple;
 pub struct Literal {
     value: String,
@@ -316,7 +316,7 @@ impl Integer {
                     ),
                     <Digits>::parse_token,
                     map(
-                        map(many1(<Digits>::parse_token), |ts| Repetition { value: ts }),
+                        map(many0(<Digits>::parse_token), |ts| Repetition { value: ts }),
                         Token::Repetition,
                     ),
                 )),

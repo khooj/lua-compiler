@@ -20,6 +20,8 @@ pub fn terminals() {
     let (_, _) = Digit::parse("2").unwrap();
     let (_, _) = Digit::parse("3").unwrap();
     let (_, _) = Digit::parse("0").unwrap();
+    let (output, _) = Digit::parse("0000").unwrap();
+    assert_eq!(output, "000");
     assert!(Digit::parse("5").is_err());
 }
 
@@ -35,8 +37,12 @@ fn cursor_check() {
     c.read_to_string(&mut s).unwrap();
 
     use nom::branch::alt;
-    use nom::bytes::streaming::{tag, take};
-    use nom::character::streaming::char;
+    use nom::bytes::complete::{tag, take};
+    use nom::character::complete::char;
+    use nom::{combinator::map, multi::many0};
+
+    let (_, dd) = many0(tag::<&str, &str, ()>("asd"))("asdasdasd").unwrap();
+    assert_eq!(dd.len(), 3);
 }
 
 //#[ignore]
@@ -59,7 +65,7 @@ pub fn or_rule() {
 pub fn simple_repetition() {
     ebnf! {
         digit = "0" | "1";
-        integer = digit, {digit};
+        integer = digit, {digit} *;
     };
 
     let (_, _) = Integer::parse("10").unwrap();
@@ -95,8 +101,8 @@ fn simple_lang() {
         digit = "0" | "1" | "2" | "3";
         plusminus = "+" | "-";
         pm_opt  = [plusminus];
-        integer = [plusminus], digit, {digit};
-        float = [plusminus], digit, {digit}, ".", digit, {digit};
+        integer = [plusminus], digit, {digit}*;
+        float = [plusminus], digit, {digit}*, ".", digit, {digit}*;
     };
 
     let (_, d) = Digit::parse_token("1").unwrap();
