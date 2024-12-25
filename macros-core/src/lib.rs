@@ -338,19 +338,19 @@ impl Parse for Repetition {
         braced!(content in input);
         let p: Rhs = content.parse()?;
 
-        let repeat = if input.peek(Token![*]) {
-            let _: Token![*] = input.parse()?;
-            RepeatType::ZeroOrMore
-        } else if input.peek(Token![+]) {
-            let _: Token![+] = input.parse()?;
-            RepeatType::OneOrMore
-        } else {
-            panic!("unknown seq char");
-        };
+        //let repeat = if input.peek(Token![*]) {
+        //    let _: Token![*] = input.parse()?;
+        //    RepeatType::ZeroOrMore
+        //} else if input.peek(Token![+]) {
+        //    let _: Token![+] = input.parse()?;
+        //    RepeatType::OneOrMore
+        //} else {
+        //    panic!("unknown seq char");
+        //};
 
         Ok(Repetition {
             rep: Box::new(p),
-            repeat,
+            repeat: RepeatType::ZeroOrMore,
         })
     }
 }

@@ -65,7 +65,7 @@ pub fn or_rule() {
 pub fn simple_repetition() {
     ebnf! {
         digit = "0" | "1";
-        integer = digit, {digit} *;
+        integer = digit, {digit};
     };
 
     let (_, _) = Integer::parse("10").unwrap();
@@ -101,8 +101,8 @@ fn simple_lang() {
         digit = "0" | "1" | "2" | "3";
         plusminus = "+" | "-";
         pm_opt  = [plusminus];
-        integer = [plusminus], digit, {digit}*;
-        float = [plusminus], digit, {digit}*, ".", digit, {digit}*;
+        integer = [plusminus], digit, {digit};
+        float = [plusminus], digit, {digit}, ".", digit, {digit};
     };
 
     let (_, d) = Digit::parse_token("1").unwrap();
@@ -123,4 +123,6 @@ fn simple_lang() {
     //
     let (_, i) = Integer::parse("11").unwrap();
     println!("{:?}", i);
+
+    let (_, f) = Float::parse("+1.123").unwrap();
 }
