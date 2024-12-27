@@ -1,7 +1,7 @@
 use convert_case::{Case, Casing};
 use proc_macro2::{Span, TokenStream, TokenTree};
 use quote::{quote, ToTokens};
-use syn::parse::{Parse, ParseStream, Peek};
+use syn::parse::{discouraged::Speculative, Parse, ParseStream, Peek};
 use syn::punctuated::Punctuated;
 use syn::{
     braced, bracketed, custom_punctuation, parse_macro_input, token, Ident, LitChar, LitStr,
@@ -65,7 +65,7 @@ impl Terminal {
     fn generate(&self, name: &Ident) -> TokenStream {
         let b = self.parse_func(name.span());
         quote! {
-            #[derive(Debug)]
+            #[derive(Debug, PartialEq)]
             pub struct #name {
                 value: Literal,
             }
@@ -117,7 +117,7 @@ impl RuleName {
     fn generate(&self, name: &Ident) -> TokenStream {
         let ident = self.ident(name.span());
         quote! {
-            #[derive(Debug)]
+            #[derive(Debug, PartialEq)]
             pub struct #name {
                 value: #ident,
             }
@@ -149,12 +149,12 @@ struct Alternatives {
 impl Parse for Alternatives {
     fn parse(input: ParseStream) -> Result<Self> {
         let mut segments = Punctuated::new();
-        let first = parse_until(input, punct::OrSep)?;
+        let first = parse_until_strict_end(input, punct::OrSep)?;
         segments.push_value(syn::parse2(first)?);
 
         while input.peek(punct::OrSep) {
             segments.push_punct(input.parse()?);
-            let second = parse_until(input, punct::OrSep)?;
+            let second = parse_until_optional_end(input, punct::OrSep)?;
             segments.push_value(syn::parse2(second)?);
         }
 
@@ -166,7 +166,7 @@ impl Alternatives {
     fn generate(&self, name: &Ident) -> TokenStream {
         let body = self.body(name.span());
         quote! {
-            #[derive(Debug)]
+            #[derive(Debug, PartialEq)]
             pub struct #name {
                 value: Alternatives,
             }
@@ -192,14 +192,28 @@ impl Alternatives {
 
     fn body(&self, span: Span) -> TokenStream {
         let mut tokens = TokenStream::new();
-        for choice in self.choices.iter() {
+        let mut alts = TokenStream::new();
+        for (idx, choice) in self.choices.iter().enumerate() {
             let b = choice.parse_func_token(span.clone());
             let q = quote! { #b, };
             tokens.extend(Some(q));
+
+            if (idx + 1) % 21 == 0 {
+                let qq = quote! {
+                    alt((#tokens)),
+                };
+                alts.extend(Some(qq));
+                tokens = TokenStream::new();
+            }
         }
 
+        let qq = quote! {
+            alt((#tokens)),
+        };
+        alts.extend(Some(qq));
+
         quote! {
-            Alternatives::parse(alt((#tokens)))
+            Alternatives::parse(alt((#alts)))
         }
     }
 }
@@ -211,12 +225,12 @@ struct Sequence {
 impl Parse for Sequence {
     fn parse(input: ParseStream) -> Result<Self> {
         let mut segments = Punctuated::new();
-        let first = parse_until(input, Token![,])?;
+        let first = parse_until_strict_end(input, Token![,])?;
         segments.push_value(syn::parse2(first)?);
 
         while input.peek(Token![,]) {
             segments.push_punct(input.parse()?);
-            let second = parse_until(input, Token![,])?;
+            let second = parse_until_optional_end(input, Token![,])?;
             segments.push_value(syn::parse2(second)?);
         }
 
@@ -228,7 +242,7 @@ impl Sequence {
     fn generate(&self, name: &Ident) -> TokenStream {
         let body = self.body(name.span());
         quote! {
-            #[derive(Debug)]
+            #[derive(Debug, PartialEq)]
             pub struct #name {
                 value: Sequence,
             }
@@ -253,6 +267,10 @@ impl Sequence {
     }
 
     fn body(&self, span: Span) -> TokenStream {
+        if self.seq.len() > 21 {
+            panic!("can't parse sequences large than 21 elements, please split")
+        }
+
         let mut tokens = TokenStream::new();
         for it in self.seq.iter() {
             let b = it.parse_func_token(span.clone());
@@ -290,7 +308,7 @@ impl Optional {
     fn generate(&self, name: &Ident) -> TokenStream {
         let body = self.body(name.span());
         quote! {
-            #[derive(Debug)]
+            #[derive(Debug, PartialEq)]
             pub struct #name {
                 value: Optional,
             }
@@ -338,19 +356,19 @@ impl Parse for Repetition {
         braced!(content in input);
         let p: Rhs = content.parse()?;
 
-        //let repeat = if input.peek(Token![*]) {
-        //    let _: Token![*] = input.parse()?;
-        //    RepeatType::ZeroOrMore
-        //} else if input.peek(Token![+]) {
-        //    let _: Token![+] = input.parse()?;
-        //    RepeatType::OneOrMore
-        //} else {
-        //    panic!("unknown seq char");
-        //};
+        let repeat = if input.peek(Token![*]) {
+            let _: Token![*] = input.parse()?;
+            RepeatType::ZeroOrMore
+        } else if input.peek(Token![+]) {
+            let _: Token![+] = input.parse()?;
+            RepeatType::OneOrMore
+        } else {
+            panic!("unknown seq char");
+        };
 
         Ok(Repetition {
             rep: Box::new(p),
-            repeat: RepeatType::ZeroOrMore,
+            repeat,
         })
     }
 }
@@ -359,7 +377,7 @@ impl Repetition {
     fn generate(&self, name: &Ident) -> TokenStream {
         let body = self.parse_func(name.span());
         quote! {
-            #[derive(Debug)]
+            #[derive(Debug, PartialEq)]
             pub struct #name {
                 value: Repetition,
             }
@@ -406,15 +424,27 @@ impl Parse for Rhs {
     fn parse(input: ParseStream) -> Result<Self> {
         let lookahead = input.lookahead1();
 
-        if input.peek2(punct::OrSep) {
-            let alt: Alternatives = input.parse()?;
+        let fork = input.fork();
+        if let Ok(alt) = fork.parse() {
+            input.advance_to(&fork);
             return Ok(Rhs::Alternatives(alt));
         }
 
-        if input.peek2(Token![,]) {
-            let seq: Sequence = input.parse()?;
+        //if input.peek2(punct::OrSep) {
+        //    let alt: Alternatives = input.parse()?;
+        //    return Ok(Rhs::Alternatives(alt));
+        //}
+
+        let fork = input.fork();
+        if let Ok(seq) = fork.parse() {
+            input.advance_to(&fork);
             return Ok(Rhs::Sequence(seq));
         }
+
+        //if input.peek2(Token![,]) {
+        //    let seq: Sequence = input.parse()?;
+        //    return Ok(Rhs::Sequence(seq));
+        //}
 
         if lookahead.peek(token::Brace) {
             let rep: Repetition = input.parse()?;
@@ -466,10 +496,10 @@ struct Rule {
 
 impl Parse for Rule {
     fn parse(input: ParseStream) -> Result<Self> {
-        let first = parse_until(input, Token![=])?;
+        let first = parse_until_strict_end(input, Token![=])?;
         let name: Ident = syn::parse2(first)?;
         let _: Token![=] = input.parse()?;
-        let ts = parse_until(input, Token![;])?;
+        let ts = parse_until_strict_end(input, Token![;])?;
         let rhs: Rhs = syn::parse2(ts)?;
 
         Ok(Rule { name, rhs })
@@ -502,13 +532,30 @@ impl Rule {
     }
 }
 
-fn parse_until<E: Peek>(input: ParseStream, end: E) -> Result<TokenStream> {
+fn parse_until_optional_end<E: Peek>(input: ParseStream, end: E) -> Result<TokenStream> {
     let mut tokens = TokenStream::new();
     while !input.is_empty() && !input.peek(end) {
         let next: TokenTree = input.parse()?;
         tokens.extend(Some(next));
     }
     Ok(tokens)
+}
+
+fn parse_until_strict_end<E: Peek>(input: ParseStream, end: E) -> Result<TokenStream> {
+    let fork = input.fork();
+    while !fork.is_empty() {
+        if fork.peek(end) {
+            return parse_until_optional_end(input, end);
+        }
+        let _: TokenTree = fork.parse()?;
+    }
+
+    let tt: TokenTree = input.parse()?;
+
+    Err(syn::Error::new_spanned(
+        tt,
+        "expected tokens to contain sequence or alternation",
+    ))
 }
 
 struct EbnfInput {
@@ -592,7 +639,7 @@ pub fn ebnf(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
     let res = quote! {
         #prelude
 
-        #[derive(Debug)]
+        #[derive(Debug, PartialEq)]
         pub struct Literal {
             value: String,
         }
@@ -613,7 +660,7 @@ pub fn ebnf(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
             }
         }
 
-        #[derive(Debug)]
+        #[derive(Debug, PartialEq)]
         pub struct Optional {
             value: Box<Option<Token>>,
         }
@@ -624,7 +671,7 @@ pub fn ebnf(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
             }
         }
 
-        #[derive(Debug)]
+        #[derive(Debug, PartialEq)]
         pub struct Repetition {
             value: Vec<Token>,
         }
@@ -635,7 +682,7 @@ pub fn ebnf(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
             }
         }
 
-        #[derive(Debug)]
+        #[derive(Debug, PartialEq)]
         pub struct Alternatives {
             value: Box<Token>,
         }
@@ -648,12 +695,12 @@ pub fn ebnf(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
             }
         }
 
-        #[derive(Debug)]
+        #[derive(Debug, PartialEq)]
         pub struct Sequence {
             value: Vec<Token>,
         }
 
-        #[derive(Debug)]
+        #[derive(Debug, PartialEq)]
         pub enum Token {
             #enum_types
             Literal(Literal),

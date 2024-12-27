@@ -1,6 +1,11 @@
 use macros_core::ebnf;
 
 #[test]
+pub fn pass() {
+    macrotest::expand("tests/expand/*.rs");
+}
+
+#[test]
 pub fn simple_term() {
     ebnf! {
         simple_term = "0";
@@ -65,7 +70,7 @@ pub fn or_rule() {
 pub fn simple_repetition() {
     ebnf! {
         digit = "0" | "1";
-        integer = digit, {digit};
+        integer = digit, {digit} *;
     };
 
     let (_, _) = Integer::parse("10").unwrap();
@@ -101,13 +106,21 @@ fn simple_lang() {
         digit = "0" | "1" | "2" | "3";
         plusminus = "+" | "-";
         pm_opt  = [plusminus];
-        integer = [plusminus], digit, {digit};
-        float = [plusminus], digit, {digit}, ".", digit, {digit};
+        integer = [plusminus], digit, {digit} *;
+        float = [plusminus], digit, {digit} *, ".", digit, {digit} *;
+        alt_seq = "a", "b", "c" | "d", "e", "f";
+        punct = "|";
+        ws = " ";
+        S = {ws}*;
+        int_braced = "\"", integer, "\"";
+        rhs = int_braced, S, punct, S, int_braced;
+        term1 = S, rhs, S, ";";
+        punct2 = "'";
     };
 
     let (_, d) = Digit::parse_token("1").unwrap();
     assert!(matches!(d, Token::Digit(_)));
-    println!("{:?}", d);
+    //println!("{:?}", d);
 
     let (_, _) = Plusminus::parse("+").unwrap();
     let (_, _) = Plusminus::parse("-").unwrap();
@@ -121,8 +134,107 @@ fn simple_lang() {
     //let (_, i) = Integer::parse("1230").unwrap();
     //assert_eq!(i.value, "1230");
     //
-    let (_, i) = Integer::parse("11").unwrap();
-    println!("{:?}", i);
+    let (_, i) = Integer::parse("+11").unwrap();
+    //println!("{:?}", i);
 
     let (_, f) = Float::parse("+1.123").unwrap();
+
+    let (_, _) = AltSeq::parse("abc").unwrap();
+    let (_, _) = AltSeq::parse("def").unwrap();
+    assert!(AltSeq::parse("ade").is_err());
+
+    let (_, _) = Punct::parse(r#"|"#).unwrap();
+
+    let (_, _) = Term1::parse(r#"    "123" |   "321"   ;"#).unwrap();
+
+    let (_, _) = Punct2::parse("\'").unwrap();
+}
+
+#[test]
+fn ebnf_check() {
+    ebnf! {
+        letter = "A" | "B" | "C" | "D" | "E" | "F" | "G"
+       | "H" | "I" | "J" | "K" | "L" | "M" | "N"
+       | "O" | "P" | "Q" | "R" | "S" | "T" | "U"
+       | "V" | "W" | "X" | "Y" | "Z" | "a" | "b"
+       | "c" | "d" | "e" | "f" | "g" | "h" | "i"
+       | "j" | "k" | "l" | "m" | "n" | "o" | "p"
+       | "q" | "r" | "s" | "t" | "u" | "v" | "w"
+       | "x" | "y" | "z" ;
+
+        digit = "0" | "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9" ;
+
+        symbol = "[" | "]" | "{" | "}" | "(" | ")" | "<" | ">"
+            | "\"" | "'" | "=" | "|" | "." | "," | ";" | "-"
+            | "+" | "*" | "?" | "\n" | "\t" | "\r" ;
+
+        character = letter | digit | symbol | "_" | " " ;
+        identifier = letter , { letter | digit | "_" } *;
+
+        S = { " " | "\n" | "\t" | "\r" } *;
+
+        // we dont support disjunction
+        //terminal = "'" , character - "'" , { character - "'" } * , "'"
+        //        | '"' , character - '"' , { character - '"' } *, '"' ;
+
+        terminal = "'" , character , { character } * , "'"
+                | "\"" , character , { character } *, "\"" ;
+
+        terminator = ";" | "." ;
+
+        term = "(" , S , rhs , S , ")"
+            | "[" , S , rhs , S , "]"
+            | "{" , S , rhs , S , "}"
+            | terminal
+            | identifier ;
+
+        factor = term , S , "?"
+            | term , S , "*"
+            | term , S , "+"
+            | term , S , "-" , S , term
+            | term , S ;
+
+        concatenation = { S , factor , S , [","] } + ;
+        alternation = { S , concatenation , S , ["|"] } + ;
+
+        rhs = alternation ;
+        lhs = identifier ;
+
+        rule = lhs , S , "=" , S , rhs , S , terminator ;
+
+        grammar = { S , rule , S } * ;
+    };
+
+    let (_, l) = Letter::parse("A").unwrap();
+    assert_eq!(
+        l.value,
+        Alternatives {
+            value: Box::new(Token::Literal(Literal {
+                value: "A".to_string()
+            }))
+        }
+    );
+
+    let (_, s) = Symbol::parse("\n").unwrap();
+    println!("ebnf sym: {:?}", s);
+
+    let (_, upper_s) = S::parse("   \r\n   \t").unwrap();
+    println!("ebnf S: {:?}", upper_s);
+
+    let (_, _) = Terminal::parse(r#""asd""#).unwrap();
+    let (_, _) = Terminal::parse(r#"'asd'"#).unwrap();
+
+    let (_, term) = Term::parse(r#"'A'"#).unwrap();
+
+    let (_, term) = Term::parse(r#"( a | b | c ) +"#).unwrap();
+    // error here
+    println!("ebnf term: {:?}", term);
+
+    let code = r#"digit = "0" | "1" | "2" ;
+    integer = digit , { digit } ;
+    "#;
+
+    let (output, parsed_ebnf) = Grammar::parse(code).unwrap();
+    println!("ebnf_check parsed: {:?}", parsed_ebnf);
+    println!("ebnf_check out: {}", output);
 }
