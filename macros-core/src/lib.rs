@@ -476,7 +476,9 @@ impl Disjunction {
     fn parse_func(&self, span: Span) -> TokenStream {
         let value_parse = self.value.parse_func_token(span.clone());
         let dis_parse = self.dis.parse_func_token(span);
-        quote! { map(#value_parse, |v| Disjunction { value: Box::new(v), dis: Box::new(Token::Literal(Literal { value: "test".to_string() })) }) }
+        quote! {
+            Disjunction::parse(#value_parse, #dis_parse)
+        }
     }
 
     fn parse_func_token(&self, span: Span) -> TokenStream {
@@ -680,6 +682,7 @@ pub fn ebnf(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
         use nom::branch::alt;
         use nom::multi::{many1, many0};
         use nom::sequence::tuple;
+        use nom::bytes::complete::take_till;
     };
     let enum_types = input
         .rules
@@ -766,7 +769,25 @@ pub fn ebnf(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
         #[derive(Debug, PartialEq)]
         pub struct Disjunction {
             value: Box<Token>,
-            dis: Box<Token>,
+        }
+
+        impl Disjunction {
+            fn parse<'a, F, F2>(mut value: F, mut dis: F2) -> impl FnMut(&'a str) -> NomResult<&'a str, Disjunction>
+                where
+                    F: FnMut(&'a str) -> NomResult<&'a str, Token>,
+                    F2: FnMut(&'a str) -> NomResult<&'a str, Token>,
+            {
+                map(move |i: &'a str| {
+                    let v = value(i);
+                    let d = dis(i);
+                    if d.is_err() {
+                        v
+                    } else {
+                        Err(nom::Err::Error(nom::error::make_error(i, nom::error::ErrorKind::Fail)))
+                    }
+                },
+                |v| Disjunction { value: Box::new(v) })
+            }
         }
 
         #[derive(Debug, PartialEq)]

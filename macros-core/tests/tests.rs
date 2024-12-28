@@ -157,7 +157,8 @@ fn simple_lang() {
 
     let (_, _) = Punct2::parse("\'").unwrap();
 
-    let (_, _) = Dis5::parse("'123'").unwrap();
+    let (_, dis5) = Dis5::parse("'123'").unwrap();
+    println!("{:?}", dis5);
 }
 
 #[test]

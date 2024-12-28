@@ -6,6 +6,7 @@ use nom::combinator::{map, opt};
 use nom::branch::alt;
 use nom::multi::{many1, many0};
 use nom::sequence::tuple;
+use nom::bytes::complete::take_till;
 pub struct Literal {
     value: String,
 }
@@ -165,19 +166,16 @@ impl ::core::cmp::PartialEq for Sequence {
 }
 pub struct Disjunction {
     value: Box<Token>,
-    dis: Box<Token>,
 }
 #[automatically_derived]
 impl ::core::fmt::Debug for Disjunction {
     #[inline]
     fn fmt(&self, f: &mut ::core::fmt::Formatter) -> ::core::fmt::Result {
-        ::core::fmt::Formatter::debug_struct_field2_finish(
+        ::core::fmt::Formatter::debug_struct_field1_finish(
             f,
             "Disjunction",
             "value",
-            &self.value,
-            "dis",
-            &&self.dis,
+            &&self.value,
         )
     }
 }
@@ -187,7 +185,34 @@ impl ::core::marker::StructuralPartialEq for Disjunction {}
 impl ::core::cmp::PartialEq for Disjunction {
     #[inline]
     fn eq(&self, other: &Disjunction) -> bool {
-        self.value == other.value && self.dis == other.dis
+        self.value == other.value
+    }
+}
+impl Disjunction {
+    fn parse<'a, F, F2>(
+        mut value: F,
+        mut dis: F2,
+    ) -> impl FnMut(&'a str) -> NomResult<&'a str, Disjunction>
+    where
+        F: FnMut(&'a str) -> NomResult<&'a str, Token>,
+        F2: FnMut(&'a str) -> NomResult<&'a str, Token>,
+    {
+        map(
+            move |i: &'a str| {
+                let v = value(i);
+                let d = dis(i);
+                if d.is_err() {
+                    v
+                } else {
+                    Err(
+                        nom::Err::Error(
+                            nom::error::make_error(i, nom::error::ErrorKind::Fail),
+                        ),
+                    )
+                }
+            },
+            |v| Disjunction { value: Box::new(v) },
+        )
     }
 }
 pub enum Token {
@@ -543,16 +568,9 @@ impl Dis1 {
                         map(
                             many1(
                                 map(
-                                    map(
+                                    Disjunction::parse(
                                         <Digits>::parse_token,
-                                        |v| Disjunction {
-                                            value: Box::new(v),
-                                            dis: Box::new(
-                                                Token::Literal(Literal {
-                                                    value: "test".to_string(),
-                                                }),
-                                            ),
-                                        },
+                                        map(Literal::parse_lit('0'), Token::Literal),
                                     ),
                                     Token::Disjunction,
                                 ),
@@ -613,16 +631,9 @@ impl Dis2 {
                                 tuple((
                                     map(Literal::parse_lit('A'), Token::Literal),
                                     map(
-                                        map(
+                                        Disjunction::parse(
                                             <Digits>::parse_token,
-                                            |v| Disjunction {
-                                                value: Box::new(v),
-                                                dis: Box::new(
-                                                    Token::Literal(Literal {
-                                                        value: "test".to_string(),
-                                                    }),
-                                                ),
-                                            },
+                                            map(Literal::parse_lit('0'), Token::Literal),
                                         ),
                                         Token::Disjunction,
                                     ),
@@ -630,16 +641,9 @@ impl Dis2 {
                                         map(
                                             many1(
                                                 map(
-                                                    map(
+                                                    Disjunction::parse(
                                                         <Digits>::parse_token,
-                                                        |v| Disjunction {
-                                                            value: Box::new(v),
-                                                            dis: Box::new(
-                                                                Token::Literal(Literal {
-                                                                    value: "test".to_string(),
-                                                                }),
-                                                            ),
-                                                        },
+                                                        map(Literal::parse_lit('0'), Token::Literal),
                                                     ),
                                                     Token::Disjunction,
                                                 ),
@@ -666,16 +670,9 @@ impl Dis2 {
                                 tuple((
                                     map(Literal::parse_lit('C'), Token::Literal),
                                     map(
-                                        map(
+                                        Disjunction::parse(
                                             <Digits>::parse_token,
-                                            |v| Disjunction {
-                                                value: Box::new(v),
-                                                dis: Box::new(
-                                                    Token::Literal(Literal {
-                                                        value: "test".to_string(),
-                                                    }),
-                                                ),
-                                            },
+                                            map(Literal::parse_lit('1'), Token::Literal),
                                         ),
                                         Token::Disjunction,
                                     ),
@@ -683,16 +680,9 @@ impl Dis2 {
                                         map(
                                             many1(
                                                 map(
-                                                    map(
+                                                    Disjunction::parse(
                                                         <Digits>::parse_token,
-                                                        |v| Disjunction {
-                                                            value: Box::new(v),
-                                                            dis: Box::new(
-                                                                Token::Literal(Literal {
-                                                                    value: "test".to_string(),
-                                                                }),
-                                                            ),
-                                                        },
+                                                        map(Literal::parse_lit('1'), Token::Literal),
                                                     ),
                                                     Token::Disjunction,
                                                 ),
