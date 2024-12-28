@@ -1,38 +1,19 @@
+use std::error::Error;
+
 use convert_case::{Case, Casing};
 use proc_macro2::{Span, TokenStream, TokenTree};
-use quote::{quote, ToTokens};
+use quote::quote;
 use syn::parse::{discouraged::Speculative, Parse, ParseStream, Peek};
 use syn::punctuated::Punctuated;
 use syn::{
-    braced, bracketed, custom_punctuation, parse_macro_input, token, Ident, LitChar, LitStr,
-    Result, Token,
+    braced, bracketed, parse_macro_input, token, Error as SynError, Ident, LitChar, LitStr, Result,
+    Token,
 };
 
 mod kw {
     use syn::custom_keyword;
 
     custom_keyword!(ebnf_sep);
-}
-
-struct EbnfSep {
-    kw_token: kw::ebnf_sep,
-    eq_token: Token![=],
-    sep_token: TokenTree,
-}
-
-impl Parse for EbnfSep {
-    fn parse(input: ParseStream) -> Result<Self> {
-        let lookahead = input.lookahead1();
-        if lookahead.peek(kw::ebnf_sep) {
-            Ok(EbnfSep {
-                kw_token: input.parse::<kw::ebnf_sep>()?,
-                eq_token: input.parse()?,
-                sep_token: input.parse()?,
-            })
-        } else {
-            Err(lookahead.error())
-        }
-    }
 }
 
 mod punct {
@@ -48,9 +29,9 @@ struct Terminal {
 
 impl Parse for Terminal {
     fn parse(input: ParseStream) -> Result<Self> {
-        let l: LitStr = input.parse()?;
+        let l: LitStr = input.parse().map_err(fast_error(input.span()))?;
         if l.value().len() != 1 {
-            return Err(syn::Error::new_spanned(
+            return Err(SynError::new_spanned(
                 l,
                 format!("terminal should be 1 character"),
             ));
@@ -102,7 +83,7 @@ struct RuleName {
 }
 impl Parse for RuleName {
     fn parse(input: ParseStream) -> Result<Self> {
-        let rn: Ident = input.parse()?;
+        let rn: Ident = input.parse().map_err(fast_error(input.span()))?;
         Ok(RuleName {
             name: rn.to_string(),
         })
@@ -149,13 +130,19 @@ struct Alternatives {
 impl Parse for Alternatives {
     fn parse(input: ParseStream) -> Result<Self> {
         let mut segments = Punctuated::new();
-        let first = parse_until_strict_end(input, punct::OrSep)?;
-        segments.push_value(syn::parse2(first)?);
+        let first = parse_until_strict_end(input, punct::OrSep).map_err(|e| {
+            SynError::new(
+                input.span(),
+                format!("unexpected token while parsing alternation: {}", e),
+            )
+        })?;
+        segments.push_value(syn::parse2(first).map_err(fast_error(input.span()))?);
 
         while input.peek(punct::OrSep) {
-            segments.push_punct(input.parse()?);
-            let second = parse_until_optional_end(input, punct::OrSep)?;
-            segments.push_value(syn::parse2(second)?);
+            segments.push_punct(input.parse().map_err(fast_error(input.span()))?);
+            let second =
+                parse_until_optional_end(input, punct::OrSep).map_err(fast_error(input.span()))?;
+            segments.push_value(syn::parse2(second).map_err(fast_error(input.span()))?);
         }
 
         Ok(Alternatives { choices: segments })
@@ -225,13 +212,25 @@ struct Sequence {
 impl Parse for Sequence {
     fn parse(input: ParseStream) -> Result<Self> {
         let mut segments = Punctuated::new();
-        let first = parse_until_strict_end(input, Token![,])?;
-        segments.push_value(syn::parse2(first)?);
+        let first = parse_until_strict_end(input, Token![,]).map_err(|e| {
+            SynError::new(
+                input.span(),
+                format!("unexpected token while parsing sequence: {}", e),
+            )
+        })?;
+        let value = syn::parse2(first).map_err(|e| {
+            SynError::new(
+                input.span(),
+                format!("unexpected value while parsing sequence: {}", e),
+            )
+        })?;
+        segments.push_value(value);
 
         while input.peek(Token![,]) {
-            segments.push_punct(input.parse()?);
-            let second = parse_until_optional_end(input, Token![,])?;
-            segments.push_value(syn::parse2(second)?);
+            segments.push_punct(input.parse().map_err(fast_error(input.span()))?);
+            let second =
+                parse_until_optional_end(input, Token![,]).map_err(fast_error(input.span()))?;
+            segments.push_value(syn::parse2(second).map_err(fast_error(input.span()))?);
         }
 
         Ok(Sequence { seq: segments })
@@ -297,7 +296,7 @@ impl Parse for Optional {
     fn parse(input: ParseStream) -> Result<Self> {
         let content;
         bracketed!(content in input);
-        let p: Rhs = content.parse()?;
+        let p: Rhs = content.parse().map_err(fast_error(input.span()))?;
         Ok(Optional {
             optional: Box::new(p),
         })
@@ -354,7 +353,7 @@ impl Parse for Repetition {
     fn parse(input: ParseStream) -> Result<Self> {
         let content;
         braced!(content in input);
-        let p: Rhs = content.parse()?;
+        let p: Rhs = content.parse().map_err(fast_error(input.span()))?;
 
         let repeat = if input.peek(Token![*]) {
             let _: Token![*] = input.parse()?;
@@ -411,6 +410,81 @@ impl Repetition {
     }
 }
 
+struct Disjunction {
+    value: Box<Rhs>,
+    dis: Box<Rhs>,
+}
+
+fn fast_error<E: Error>(span: Span) -> impl Fn(E) -> SynError {
+    move |_| SynError::new(span, "fast error")
+}
+
+impl Parse for Disjunction {
+    fn parse(input: ParseStream) -> Result<Self> {
+        let tokens = parse_until_strict_end(input, Token![-]).map_err(|e| {
+            SynError::new(
+                input.span(),
+                format!("unexpected token while parsing disjunction: {}", e),
+            )
+        })?;
+        let value = syn::parse2(tokens).map_err(|e| {
+            SynError::new(
+                input.span(),
+                format!(
+                    "unexpected error while parsing tokens in disjunction: {}",
+                    e
+                ),
+            )
+        })?;
+        let _: Token![-] = input.parse().map_err(fast_error(input.span()))?;
+        //let tokens = parse_until_optional_end(input, Token![-])?;
+        let dis = input.parse().map_err(|e| {
+            SynError::new(
+                input.span(),
+                format!("unexpected token while parsing dis in disjunction: {}", e),
+            )
+        })?;
+
+        Ok(Disjunction {
+            value: Box::new(value),
+            dis: Box::new(dis),
+        })
+    }
+}
+
+impl Disjunction {
+    fn generate(&self, name: &Ident) -> TokenStream {
+        let ps = self.parse_func(name.span());
+        quote! {
+            #[derive(Debug, PartialEq)]
+            pub struct #name {
+                value: Disjunction,
+            }
+
+            impl #name {
+                pub fn parse_token(input: &str) -> NomResult<&str, Token> {
+                    map(<#name>::parse, Token::#name)(input)
+                }
+
+                pub fn parse(input: &str) -> NomResult<&str, #name> {
+                    map(#ps, |value| #name { value })(input)
+                }
+            }
+        }
+    }
+
+    fn parse_func(&self, span: Span) -> TokenStream {
+        let value_parse = self.value.parse_func_token(span.clone());
+        let dis_parse = self.dis.parse_func_token(span);
+        quote! { map(#value_parse, |v| Disjunction { value: Box::new(v), dis: Box::new(Token::Literal(Literal { value: "test".to_string() })) }) }
+    }
+
+    fn parse_func_token(&self, span: Span) -> TokenStream {
+        let ps = self.parse_func(span);
+        quote! { map(#ps, Token::Disjunction) }
+    }
+}
+
 enum Rhs {
     Terminal(Terminal),
     Rule(RuleName),
@@ -418,6 +492,7 @@ enum Rhs {
     Sequence(Sequence),
     Optional(Optional),
     Repetition(Repetition),
+    Disjunction(Disjunction),
 }
 
 impl Parse for Rhs {
@@ -446,22 +521,30 @@ impl Parse for Rhs {
         //    return Ok(Rhs::Sequence(seq));
         //}
 
+        if input.peek2(Token![-]) {
+            return Ok(Rhs::Disjunction(
+                input.parse().map_err(fast_error(input.span()))?,
+            ));
+        }
+
         if lookahead.peek(token::Brace) {
-            let rep: Repetition = input.parse()?;
+            let rep: Repetition = input.parse().map_err(fast_error(input.span()))?;
             return Ok(Rhs::Repetition(rep));
         }
 
         if lookahead.peek(token::Bracket) {
-            let opt: Optional = input.parse()?;
+            let opt: Optional = input.parse().map_err(fast_error(input.span()))?;
             return Ok(Rhs::Optional(opt));
         }
 
         if lookahead.peek(Ident) {
-            let rn: RuleName = input.parse()?;
+            let rn: RuleName = input.parse().map_err(fast_error(input.span()))?;
             return Ok(Rhs::Rule(rn));
         }
 
-        Ok(Rhs::Terminal(input.parse()?))
+        Ok(Rhs::Terminal(
+            input.parse().map_err(fast_error(input.span()))?,
+        ))
     }
 }
 
@@ -474,6 +557,7 @@ impl Rhs {
             Rhs::Repetition(rep) => rep.generate(name),
             Rhs::Sequence(seq) => seq.generate(name),
             Rhs::Rule(rn) => rn.generate(name),
+            Rhs::Disjunction(dis) => dis.generate(name),
         }
     }
 
@@ -485,6 +569,7 @@ impl Rhs {
             Rhs::Sequence(seq) => seq.parse_func_token(span),
             Rhs::Optional(opt) => opt.parse_func_token(span),
             Rhs::Repetition(rep) => rep.parse_func_token(span),
+            Rhs::Disjunction(dis) => dis.parse_func_token(span),
         }
     }
 }
@@ -547,10 +632,10 @@ fn parse_until_strict_end<E: Peek>(input: ParseStream, end: E) -> Result<TokenSt
         if fork.peek(end) {
             return parse_until_optional_end(input, end);
         }
-        let _: TokenTree = fork.parse()?;
+        let _: TokenTree = fork.parse().map_err(fast_error(input.span()))?;
     }
 
-    let tt: TokenTree = input.parse()?;
+    let tt: TokenTree = input.parse().map_err(fast_error(input.span()))?;
 
     Err(syn::Error::new_spanned(
         tt,
@@ -603,28 +688,6 @@ pub fn ebnf(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
             let name = r.ident();
             quote! {
                 #name(#name),
-            }
-        })
-        .collect::<TokenStream>();
-
-    //let token_parse = input
-    //    .rules
-    //    .iter()
-    //    .map(|r| {
-    //        let name = r.ident();
-    //        quote! {
-    //            Token::#name(t) => t.parse(input),
-    //        }
-    //    })
-    //    .collect::<TokenStream>();
-
-    let token_value = input
-        .rules
-        .iter()
-        .map(|r| {
-            let name = r.ident();
-            quote! {
-                Token::#name(t) => t.value(),
             }
         })
         .collect::<TokenStream>();
@@ -701,6 +764,12 @@ pub fn ebnf(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
         }
 
         #[derive(Debug, PartialEq)]
+        pub struct Disjunction {
+            value: Box<Token>,
+            dis: Box<Token>,
+        }
+
+        #[derive(Debug, PartialEq)]
         pub enum Token {
             #enum_types
             Literal(Literal),
@@ -708,6 +777,7 @@ pub fn ebnf(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
             Repetition(Repetition),
             Alternatives(Alternatives),
             Sequence(Sequence),
+            Disjunction(Disjunction),
         }
 
         impl Token {

@@ -116,6 +116,14 @@ fn simple_lang() {
         rhs = int_braced, S, punct, S, int_braced;
         term1 = S, rhs, S, ";";
         punct2 = "'";
+        dis1 = digit - "0";
+        dis2 = digit - digit;
+        dis3 = digit - S;
+        seq2 = "A", digit - "0", "B";
+        alt2 = digit - "0" | digit - "1";
+        alt_seq2 = "B", digit - "1", "C" | "D", plusminus - "+", "C";
+        dis4 = "A", digit, { digit - "0" } +;
+        dis5 = "'", {digit - "0"}+, "'";
     };
 
     let (_, d) = Digit::parse_token("1").unwrap();
@@ -148,6 +156,8 @@ fn simple_lang() {
     let (_, _) = Term1::parse(r#"    "123" |   "321"   ;"#).unwrap();
 
     let (_, _) = Punct2::parse("\'").unwrap();
+
+    let (_, _) = Dis5::parse("'123'").unwrap();
 }
 
 #[test]
@@ -173,11 +183,10 @@ fn ebnf_check() {
 
         S = { " " | "\n" | "\t" | "\r" } *;
 
-        // we dont support disjunction
-        //terminal = "'" , character - "'" , { character - "'" } * , "'"
-        //        | '"' , character - '"' , { character - '"' } *, '"' ;
+        terminal = "'" , character-"'" , { character-"'" } * , "'"
+                | "\"" , character-"\"" , { character-"\"" } *, "\"" ;
 
-        terminal = "'" , character , { character } * , "'"
+        terminal2 = "'" , character , { character } * , "'"
                 | "\"" , character , { character } *, "\"" ;
 
         terminator = ";" | "." ;

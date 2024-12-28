@@ -22,11 +22,11 @@ use macros_core::ebnf;
         S = { " " | "\n" | "\t" | "\r" } *;
 
         // we dont support disjunction
-        //terminal = "'" , character - "'" , { character - "'" } * , "'"
-        //        | '"' , character - '"' , { character - '"' } *, '"' ;
+        terminal = "'" , character - "'" , { character - "'" } * , "'"
+                | '"' , character - '"' , { character - '"' } *, '"' ;
 
-        terminal = "'" , character , { character } * , "'"
-                | "\"" , character , { character } *, "\"" ;
+        //terminal = "'" , character , { character } * , "'"
+        //        | "\"" , character , { character } *, "\"" ;
 
         terminator = ";" | "." ;
 
