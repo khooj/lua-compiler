@@ -45,6 +45,7 @@ impl Parse for Terminal {
 impl Terminal {
     fn generate(&self, name: &Ident) -> TokenStream {
         let b = self.parse_func(name.span());
+        let ln = LitStr::new(&name.to_string(), name.span());
         quote! {
             #[derive(Debug, PartialEq)]
             pub struct #name {
@@ -58,6 +59,11 @@ impl Terminal {
 
                 pub fn parse(input: &str) -> NomResult<&str, #name> {
                     map(#b, |l| #name { value: l })(input)
+                }
+
+                fn print_tree(&self, level: u32) {
+                    print_shifted(level, #ln);
+                    self.value.print_tree(level+1);
                 }
             }
         }
@@ -97,6 +103,7 @@ impl RuleName {
 
     fn generate(&self, name: &Ident) -> TokenStream {
         let ident = self.ident(name.span());
+        let ln = LitStr::new(&name.to_string(), name.span());
         quote! {
             #[derive(Debug, PartialEq)]
             pub struct #name {
@@ -110,6 +117,11 @@ impl RuleName {
 
                 pub fn parse(input: &str) -> NomResult<&str, #name> {
                     map(<#ident>::parse, |rn| #name { value: rn })(input)
+                }
+
+                fn print_tree(&self, level: u32) {
+                    print_shifted(level, #ln);
+                    self.value.print_tree(level+1);
                 }
             }
         }
@@ -152,6 +164,7 @@ impl Parse for Alternatives {
 impl Alternatives {
     fn generate(&self, name: &Ident) -> TokenStream {
         let body = self.body(name.span());
+        let ln = LitStr::new(&name.to_string(), name.span());
         quote! {
             #[derive(Debug, PartialEq)]
             pub struct #name {
@@ -165,6 +178,11 @@ impl Alternatives {
 
                 pub fn parse(input: &str) -> NomResult<&str, #name> {
                     map(#body, |v| #name { value: v })(input)
+                }
+
+                fn print_tree(&self, level: u32) {
+                    print_shifted(level, #ln);
+                    self.value.print_tree(level+1);
                 }
             }
         }
@@ -240,6 +258,7 @@ impl Parse for Sequence {
 impl Sequence {
     fn generate(&self, name: &Ident) -> TokenStream {
         let body = self.body(name.span());
+        let ln = LitStr::new(&name.to_string(), name.span());
         quote! {
             #[derive(Debug, PartialEq)]
             pub struct #name {
@@ -253,6 +272,11 @@ impl Sequence {
 
                 pub fn parse(input: &str) -> NomResult<&str, #name> {
                     map(#body, |v| #name { value: v })(input)
+                }
+
+                fn print_tree(&self, level: u32) {
+                    print_shifted(level, #ln);
+                    self.value.print_tree(level+1);
                 }
             }
         }
@@ -306,6 +330,7 @@ impl Parse for Optional {
 impl Optional {
     fn generate(&self, name: &Ident) -> TokenStream {
         let body = self.body(name.span());
+        let ln = LitStr::new(&name.to_string(), name.span());
         quote! {
             #[derive(Debug, PartialEq)]
             pub struct #name {
@@ -319,6 +344,11 @@ impl Optional {
 
                 pub fn parse(input: &str) -> NomResult<&str, #name> {
                     map(#body, |v| #name { value: v })(input)
+                }
+
+                fn print_tree(&self, level: u32) {
+                    print_shifted(level, #ln);
+                    self.value.print_tree(level+1);
                 }
             }
         }
@@ -375,6 +405,7 @@ impl Parse for Repetition {
 impl Repetition {
     fn generate(&self, name: &Ident) -> TokenStream {
         let body = self.parse_func(name.span());
+        let ln = LitStr::new(&name.to_string(), name.span());
         quote! {
             #[derive(Debug, PartialEq)]
             pub struct #name {
@@ -388,6 +419,11 @@ impl Repetition {
 
                 pub fn parse(input: &str) -> NomResult<&str, #name> {
                     map(#body, |v| #name { value: v })(input)
+                }
+
+                fn print_tree(&self, level: u32) {
+                    print_shifted(level, #ln);
+                    self.value.print_tree(level+1);
                 }
             }
         }
@@ -455,6 +491,7 @@ impl Parse for Disjunction {
 impl Disjunction {
     fn generate(&self, name: &Ident) -> TokenStream {
         let ps = self.parse_func(name.span());
+        let ln = LitStr::new(&name.to_string(), name.span());
         quote! {
             #[derive(Debug, PartialEq)]
             pub struct #name {
@@ -468,6 +505,11 @@ impl Disjunction {
 
                 pub fn parse(input: &str) -> NomResult<&str, #name> {
                     map(#ps, |value| #name { value })(input)
+                }
+
+                fn print_tree(&self, level: u32) {
+                    print_shifted(level, #ln);
+                    self.value.print_tree(level+1);
                 }
             }
         }
@@ -695,6 +737,17 @@ pub fn ebnf(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
         })
         .collect::<TokenStream>();
 
+    let print_tree_match = input
+        .rules
+        .iter()
+        .map(|r| {
+            let name = r.ident();
+            quote! {
+                Token::#name(t) => t.print_tree(level+1),
+            }
+        })
+        .collect::<TokenStream>();
+
     let body = input
         .rules
         .into_iter()
@@ -724,6 +777,11 @@ pub fn ebnf(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
             fn parse_lit<'a>(lit: char) -> impl FnMut(&'a str) -> NomResult<&'a str, Literal> {
                 map(char(lit), |t| Literal { value: t.to_string() })
             }
+
+            fn print_tree(&self, level: u32) {
+                print_shifted(level, "Literal:");
+                print_shifted(level+1, &format!("{}", self.value));
+            }
         }
 
         #[derive(Debug, PartialEq)]
@@ -734,6 +792,17 @@ pub fn ebnf(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
         impl From<Option<Token>> for Optional {
             fn from(value: Option<Token>) -> Self {
                 Optional { value: Box::new(value) }
+            }
+        }
+
+        impl Optional {
+            fn print_tree(&self, level: u32) {
+                print_shifted(level, "Optional:");
+                if let Some(ref t) = *self.value {
+                    Token::print_tree_impl(t, level+1);
+                } else {
+                    print_shifted(level+1, "None");
+                }
             }
         }
 
@@ -748,6 +817,15 @@ pub fn ebnf(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
             }
         }
 
+        impl Repetition {
+            fn print_tree(&self, level: u32) {
+                print_shifted(level, "Repetition:");
+                for el in self.value.iter() {
+                    Token::print_tree_impl(el, level+1);
+                }
+            }
+        }
+
         #[derive(Debug, PartialEq)]
         pub struct Alternatives {
             value: Box<Token>,
@@ -759,11 +837,25 @@ pub fn ebnf(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
             {
                 map(alts, |ts| Alternatives { value: Box::new(ts) })
             }
+
+            fn print_tree(&self, level: u32) {
+                print_shifted(level, "Alternatives:");
+                Token::print_tree_impl(&*self.value, level+1);
+            }
         }
 
         #[derive(Debug, PartialEq)]
         pub struct Sequence {
             value: Vec<Token>,
+        }
+
+        impl Sequence {
+            fn print_tree(&self, level: u32) {
+                print_shifted(level, "Sequence:");
+                for el in self.value.iter() {
+                    Token::print_tree_impl(el, level+1);
+                }
+            }
         }
 
         #[derive(Debug, PartialEq)]
@@ -788,6 +880,15 @@ pub fn ebnf(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
                 },
                 |v| Disjunction { value: Box::new(v) })
             }
+
+            fn print_tree(&self, level: u32) {
+                print_shifted(level, "Disjunction:");
+                Token::print_tree_impl(&*self.value, level+1);
+            }
+        }
+
+        fn print_shifted(level: u32, text: &str) {
+            println!("{}", " ".repeat(level.try_into().unwrap()) + text);
         }
 
         #[derive(Debug, PartialEq)]
@@ -813,6 +914,22 @@ pub fn ebnf(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
                 match self {
                     //#token_value
                     _ => unimplemented!()
+                }
+            }
+
+            pub fn print_tree(&self) {
+                Token::print_tree_impl(self, 0)
+            }
+
+            fn print_tree_impl(token: &Token, level: u32) {
+                match token {
+                    #print_tree_match
+                    Token::Literal(t) => t.print_tree(level),
+                    Token::Optional(t) => t.print_tree(level),
+                    Token::Repetition(t) => t.print_tree(level),
+                    Token::Alternatives(t) => t.print_tree(level),
+                    Token::Sequence(t) => t.print_tree(level),
+                    Token::Disjunction(t) => t.print_tree(level),
                 }
             }
         }

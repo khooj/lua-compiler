@@ -244,7 +244,8 @@ fn ebnf_check() {
     integer = digit , { digit } ;
     "#;
 
-    let (output, parsed_ebnf) = Grammar::parse(code).unwrap();
-    println!("ebnf_check parsed: {:?}", parsed_ebnf);
-    println!("ebnf_check out: {}", output);
+    let (output, parsed_ebnf) = Grammar::parse_token(code).unwrap();
+    //println!("ebnf_check parsed: {:?}", parsed_ebnf);
+    //println!("ebnf_check out: {}", output);
+    parsed_ebnf.print_tree();
 }

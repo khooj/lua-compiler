@@ -42,6 +42,16 @@ impl Literal {
     fn parse_lit<'a>(lit: char) -> impl FnMut(&'a str) -> NomResult<&'a str, Literal> {
         map(char(lit), |t| Literal { value: t.to_string() })
     }
+    fn print_tree(&self, level: u32) {
+        print_shifted(level, "Literal:");
+        print_shifted(
+            level + 1,
+            &{
+                let res = ::alloc::fmt::format(format_args!("{0}", self.value));
+                res
+            },
+        );
+    }
 }
 pub struct Optional {
     value: Box<Option<Token>>,
@@ -72,6 +82,16 @@ impl From<Option<Token>> for Optional {
         Optional { value: Box::new(value) }
     }
 }
+impl Optional {
+    fn print_tree(&self, level: u32) {
+        print_shifted(level, "Optional:");
+        if let Some(ref t) = *self.value {
+            Token::print_tree_impl(t, level + 1);
+        } else {
+            print_shifted(level + 1, "None");
+        }
+    }
+}
 pub struct Repetition {
     value: Vec<Token>,
 }
@@ -99,6 +119,14 @@ impl ::core::cmp::PartialEq for Repetition {
 impl From<Vec<Token>> for Repetition {
     fn from(value: Vec<Token>) -> Self {
         Repetition { value }
+    }
+}
+impl Repetition {
+    fn print_tree(&self, level: u32) {
+        print_shifted(level, "Repetition:");
+        for el in self.value.iter() {
+            Token::print_tree_impl(el, level + 1);
+        }
     }
 }
 pub struct Alternatives {
@@ -139,6 +167,10 @@ impl Alternatives {
             },
         )
     }
+    fn print_tree(&self, level: u32) {
+        print_shifted(level, "Alternatives:");
+        Token::print_tree_impl(&*self.value, level + 1);
+    }
 }
 pub struct Sequence {
     value: Vec<Token>,
@@ -162,6 +194,14 @@ impl ::core::cmp::PartialEq for Sequence {
     #[inline]
     fn eq(&self, other: &Sequence) -> bool {
         self.value == other.value
+    }
+}
+impl Sequence {
+    fn print_tree(&self, level: u32) {
+        print_shifted(level, "Sequence:");
+        for el in self.value.iter() {
+            Token::print_tree_impl(el, level + 1);
+        }
     }
 }
 pub struct Disjunction {
@@ -214,6 +254,17 @@ impl Disjunction {
             |v| Disjunction { value: Box::new(v) },
         )
     }
+    fn print_tree(&self, level: u32) {
+        print_shifted(level, "Disjunction:");
+        Token::print_tree_impl(&*self.value, level + 1);
+    }
+}
+fn print_shifted(level: u32, text: &str) {
+    {
+        ::std::io::_print(
+            format_args!("{0}\n", " ".repeat(level.try_into().unwrap()) + text),
+        );
+    };
 }
 pub enum Token {
     Digit(Digit),
@@ -357,6 +408,25 @@ impl Token {
             _ => ::core::panicking::panic("not implemented"),
         }
     }
+    pub fn print_tree(&self) {
+        Token::print_tree_impl(self, 0)
+    }
+    fn print_tree_impl(token: &Token, level: u32) {
+        match token {
+            Token::Digit(t) => t.print_tree(level + 1),
+            Token::Digits(t) => t.print_tree(level + 1),
+            Token::Plusminus(t) => t.print_tree(level + 1),
+            Token::Integer(t) => t.print_tree(level + 1),
+            Token::Dis1(t) => t.print_tree(level + 1),
+            Token::Dis2(t) => t.print_tree(level + 1),
+            Token::Literal(t) => t.print_tree(level),
+            Token::Optional(t) => t.print_tree(level),
+            Token::Repetition(t) => t.print_tree(level),
+            Token::Alternatives(t) => t.print_tree(level),
+            Token::Sequence(t) => t.print_tree(level),
+            Token::Disjunction(t) => t.print_tree(level),
+        }
+    }
 }
 pub struct Digit {
     value: Literal,
@@ -388,6 +458,10 @@ impl Digit {
     }
     pub fn parse(input: &str) -> NomResult<&str, Digit> {
         map(Literal::parse_lit('0'), |l| Digit { value: l })(input)
+    }
+    fn print_tree(&self, level: u32) {
+        print_shifted(level, "Digit");
+        self.value.print_tree(level + 1);
     }
 }
 pub struct Digits {
@@ -431,6 +505,10 @@ impl Digits {
             |v| Digits { value: v },
         )(input)
     }
+    fn print_tree(&self, level: u32) {
+        print_shifted(level, "Digits");
+        self.value.print_tree(level + 1);
+    }
 }
 pub struct Plusminus {
     value: Alternatives,
@@ -472,6 +550,10 @@ impl Plusminus {
             ),
             |v| Plusminus { value: v },
         )(input)
+    }
+    fn print_tree(&self, level: u32) {
+        print_shifted(level, "Plusminus");
+        self.value.print_tree(level + 1);
     }
 }
 pub struct Integer {
@@ -529,6 +611,10 @@ impl Integer {
             ),
             |v| Integer { value: v },
         )(input)
+    }
+    fn print_tree(&self, level: u32) {
+        print_shifted(level, "Integer");
+        self.value.print_tree(level + 1);
     }
 }
 pub struct Dis1 {
@@ -591,6 +677,10 @@ impl Dis1 {
             ),
             |v| Dis1 { value: v },
         )(input)
+    }
+    fn print_tree(&self, level: u32) {
+        print_shifted(level, "Dis1");
+        self.value.print_tree(level + 1);
     }
 }
 pub struct Dis2 {
@@ -709,6 +799,10 @@ impl Dis2 {
             ),
             |v| Dis2 { value: v },
         )(input)
+    }
+    fn print_tree(&self, level: u32) {
+        print_shifted(level, "Dis2");
+        self.value.print_tree(level + 1);
     }
 }
 pub fn main() {}
