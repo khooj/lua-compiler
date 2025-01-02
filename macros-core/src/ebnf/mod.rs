@@ -24,21 +24,19 @@ mod punct {
 }
 
 pub struct Terminal {
-    pub value: char,
+    pub value: String,
 }
 
 impl Parse for Terminal {
     fn parse(input: ParseStream) -> Result<Self> {
         let l: LitStr = input.parse().map_err(fast_error(input.span()))?;
-        if l.value().len() != 1 {
-            return Err(SynError::new_spanned(
-                l,
-                format!("terminal should be 1 character"),
-            ));
-        }
-        Ok(Terminal {
-            value: l.value().chars().nth(0).unwrap(),
-        })
+        //if l.value().len() != 1 {
+        //    return Err(SynError::new_spanned(
+        //        l,
+        //        format!("terminal should be 1 character"),
+        //    ));
+        //}
+        Ok(Terminal { value: l.value() })
     }
 }
 

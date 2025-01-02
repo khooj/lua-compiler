@@ -51,7 +51,7 @@ impl Generate for EbnfTerminal {
     }
 
     fn parse_func(&self, span: Span) -> TokenStream {
-        let lit = LitChar::new(self.value, span);
+        let lit = LitStr::new(&self.value, span);
         quote! {
             Literal::parse_lit(#lit)
         }
@@ -142,7 +142,7 @@ impl Generate for EbnfAlternatives {
             let q = quote! { #b, };
             tokens.extend(Some(q));
 
-            if (idx + 1) % 21 == 0 {
+            if (idx + 1) % 20 == 0 {
                 let qq = quote! {
                     alt((#tokens)),
                 };
@@ -395,13 +395,12 @@ impl Generator {
     fn generate_impl(&self) -> TokenStream {
         let prelude = quote! {
             use std::io::{Cursor, Read};
-            use nom::character::complete::char;
             use nom::{IResult as NomResult};
             use nom::combinator::{map, opt};
             use nom::branch::alt;
             use nom::multi::{many1, many0};
             use nom::sequence::tuple;
-            use nom::bytes::complete::take_till;
+            use nom::bytes::complete::{take_till, tag};
         };
         let enum_types = self
             .0
@@ -442,15 +441,15 @@ impl Generator {
                 value: String,
             }
 
-            impl From<char> for Literal {
-                fn from(value: char) -> Self {
+            impl From<&str> for Literal {
+                fn from(value: &str) -> Self {
                     Literal { value: value.to_string() }
                 }
             }
 
             impl Literal {
-                fn parse_lit<'a>(lit: char) -> impl FnMut(&'a str) -> NomResult<&'a str, Literal> {
-                    map(char(lit), |t| Literal { value: t.to_string() })
+                fn parse_lit<'a>(lit: &'a str) -> impl FnMut(&'a str) -> NomResult<&'a str, Literal> {
+                    map(tag(lit), |t: &str| Literal { value: t.to_string() })
                 }
 
                 fn print_tree(&self, level: u32) {

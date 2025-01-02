@@ -1,12 +1,11 @@
 use macros_core::ebnf;
 use std::io::{Cursor, Read};
-use nom::character::complete::char;
 use nom::IResult as NomResult;
 use nom::combinator::{map, opt};
 use nom::branch::alt;
 use nom::multi::{many1, many0};
 use nom::sequence::tuple;
-use nom::bytes::complete::take_till;
+use nom::bytes::complete::{take_till, tag};
 pub struct Literal {
     value: String,
 }
@@ -31,16 +30,18 @@ impl ::core::cmp::PartialEq for Literal {
         self.value == other.value
     }
 }
-impl From<char> for Literal {
-    fn from(value: char) -> Self {
+impl From<&str> for Literal {
+    fn from(value: &str) -> Self {
         Literal {
             value: value.to_string(),
         }
     }
 }
 impl Literal {
-    fn parse_lit<'a>(lit: char) -> impl FnMut(&'a str) -> NomResult<&'a str, Literal> {
-        map(char(lit), |t| Literal { value: t.to_string() })
+    fn parse_lit<'a>(
+        lit: &'a str,
+    ) -> impl FnMut(&'a str) -> NomResult<&'a str, Literal> {
+        map(tag(lit), |t: &str| Literal { value: t.to_string() })
     }
     fn print_tree(&self, level: u32) {
         print_shifted(level, "Literal:");
@@ -457,7 +458,7 @@ impl Digit {
         map(<Digit>::parse, Token::Digit)(input)
     }
     pub fn parse(input: &str) -> NomResult<&str, Digit> {
-        map(Literal::parse_lit('0'), |l| Digit { value: l })(input)
+        map(Literal::parse_lit("0"), |l| Digit { value: l })(input)
     }
     fn print_tree(&self, level: u32) {
         print_shifted(level, "Digit");
@@ -497,8 +498,8 @@ impl Digits {
             Alternatives::parse(
                 alt((
                     alt((
-                        map(Literal::parse_lit('0'), Token::Literal),
-                        map(Literal::parse_lit('1'), Token::Literal),
+                        map(Literal::parse_lit("0"), Token::Literal),
+                        map(Literal::parse_lit("1"), Token::Literal),
                     )),
                 )),
             ),
@@ -543,8 +544,8 @@ impl Plusminus {
             Alternatives::parse(
                 alt((
                     alt((
-                        map(Literal::parse_lit('+'), Token::Literal),
-                        map(Literal::parse_lit('-'), Token::Literal),
+                        map(Literal::parse_lit("+"), Token::Literal),
+                        map(Literal::parse_lit("-"), Token::Literal),
                     )),
                 )),
             ),
@@ -649,14 +650,14 @@ impl Dis1 {
         map(
             map(
                 tuple((
-                    map(Literal::parse_lit('\''), Token::Literal),
+                    map(Literal::parse_lit("'"), Token::Literal),
                     map(
                         map(
                             many1(
                                 map(
                                     Disjunction::parse(
                                         <Digits>::parse_token,
-                                        map(Literal::parse_lit('0'), Token::Literal),
+                                        map(Literal::parse_lit("0"), Token::Literal),
                                     ),
                                     Token::Disjunction,
                                 ),
@@ -665,7 +666,7 @@ impl Dis1 {
                         ),
                         Token::Repetition,
                     ),
-                    map(Literal::parse_lit('\''), Token::Literal),
+                    map(Literal::parse_lit("'"), Token::Literal),
                 )),
                 |ts| {
                     let mut v = Vec::with_capacity(3usize);
@@ -719,11 +720,11 @@ impl Dis2 {
                         map(
                             map(
                                 tuple((
-                                    map(Literal::parse_lit('A'), Token::Literal),
+                                    map(Literal::parse_lit("A"), Token::Literal),
                                     map(
                                         Disjunction::parse(
                                             <Digits>::parse_token,
-                                            map(Literal::parse_lit('0'), Token::Literal),
+                                            map(Literal::parse_lit("0"), Token::Literal),
                                         ),
                                         Token::Disjunction,
                                     ),
@@ -733,7 +734,7 @@ impl Dis2 {
                                                 map(
                                                     Disjunction::parse(
                                                         <Digits>::parse_token,
-                                                        map(Literal::parse_lit('0'), Token::Literal),
+                                                        map(Literal::parse_lit("0"), Token::Literal),
                                                     ),
                                                     Token::Disjunction,
                                                 ),
@@ -742,7 +743,7 @@ impl Dis2 {
                                         ),
                                         Token::Repetition,
                                     ),
-                                    map(Literal::parse_lit('B'), Token::Literal),
+                                    map(Literal::parse_lit("B"), Token::Literal),
                                 )),
                                 |ts| {
                                     let mut v = Vec::with_capacity(4usize);
@@ -758,11 +759,11 @@ impl Dis2 {
                         map(
                             map(
                                 tuple((
-                                    map(Literal::parse_lit('C'), Token::Literal),
+                                    map(Literal::parse_lit("C"), Token::Literal),
                                     map(
                                         Disjunction::parse(
                                             <Digits>::parse_token,
-                                            map(Literal::parse_lit('1'), Token::Literal),
+                                            map(Literal::parse_lit("1"), Token::Literal),
                                         ),
                                         Token::Disjunction,
                                     ),
@@ -772,7 +773,7 @@ impl Dis2 {
                                                 map(
                                                     Disjunction::parse(
                                                         <Digits>::parse_token,
-                                                        map(Literal::parse_lit('1'), Token::Literal),
+                                                        map(Literal::parse_lit("1"), Token::Literal),
                                                     ),
                                                     Token::Disjunction,
                                                 ),
@@ -781,7 +782,7 @@ impl Dis2 {
                                         ),
                                         Token::Repetition,
                                     ),
-                                    map(Literal::parse_lit('D'), Token::Literal),
+                                    map(Literal::parse_lit("D"), Token::Literal),
                                 )),
                                 |ts| {
                                     let mut v = Vec::with_capacity(4usize);
